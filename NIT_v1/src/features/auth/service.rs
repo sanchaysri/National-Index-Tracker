@@ -2,6 +2,7 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
+use email_address::{EmailAddress, Options};
 use sqlx::PgPool;
 
 use crate::error::AppError;
@@ -10,10 +11,6 @@ use super::{
     model::{LoginRequest, LoginResponse, RegisterRequest, RegisterResponse},
     repository,
 };
-
-// --------------------------------------------------
-// REGISTER USER
-// --------------------------------------------------
 
 pub async fn register_user(
     pool: &PgPool,
@@ -31,7 +28,16 @@ pub async fn register_user(
     // Step 2: Normalize and validate email
     let email = request.email.trim().to_lowercase();
 
-    if email.len() > 255 || !email.contains('@') || email.contains(char::is_whitespace) {
+    let email_options = Options {
+        minimum_sub_domains: 2,
+        allow_domain_literal: false,
+        allow_display_text: false,
+        allow_long_local_parts: false,
+    };
+    if email.len() > 254
+        || email.contains(char::is_whitespace)
+        || EmailAddress::parse_with_options(&email, email_options).is_err()
+    {
         return Err(AppError::BadRequest("Invalid email address".into()));
     }
 
@@ -74,9 +80,13 @@ pub async fn register_user(
     Ok(RegisterResponse::from(user))
 }
 
-// --------------------------------------------------
-// LOGIN USER
-// --------------------------------------------------
+fn role_destination(is_admin: bool) -> (&'static str, &'static str) {
+    if is_admin {
+        ("admin", "/admin/dashboard")
+    } else {
+        ("user", "/dashboard")
+    }
+}
 
 pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginResponse, AppError> {
     // Step 1: Normalize email
@@ -115,11 +125,7 @@ pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginRes
     }
 
     // Step 6: Determine user role
-    let (role, redirect_to) = if user.is_admin {
-        ("admin", "/admin/dashboard")
-    } else {
-        ("user", "/dashboard")
-    };
+    let (role, redirect_to) = role_destination(user.is_admin);
 
     // Step 7: Return login response
     Ok(LoginResponse {
@@ -127,4 +133,35 @@ pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginRes
         role: role.to_string(),
         redirect_to: redirect_to.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::role_destination;
+
+    #[test]
+    fn admin_should_get_admin_dashboard() {
+        // Arrange
+        let is_admin = true;
+
+        // Act
+        let (role, redirect_to) = role_destination(is_admin);
+
+        // Assert
+        assert_eq!(role, "admin");
+        assert_eq!(redirect_to, "/admin/dashboard");
+    }
+
+    #[test]
+    fn normal_user_should_get_user_dashboard() {
+        // Arrange
+        let is_admin = false;
+
+        // Act
+        let (role, redirect_to) = role_destination(is_admin);
+
+        // Assert
+        assert_eq!(role, "user");
+        assert_eq!(redirect_to, "/dashboard");
+    }
 }
