@@ -1,5 +1,6 @@
 pub mod config;
 pub mod db;
+pub mod middleware;
 pub mod state;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
