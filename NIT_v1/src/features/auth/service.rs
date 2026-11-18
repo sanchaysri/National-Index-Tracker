@@ -2,6 +2,7 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
 };
+use email_address::{EmailAddress, Options};
 use sqlx::PgPool;
 
 use crate::error::AppError;
@@ -27,7 +28,14 @@ pub async fn register_user(
     // 2. Normalize and validate email
     let email = request.email.trim().to_lowercase();
 
-    if email.len() > 255 || !email.contains('@') || email.contains(char::is_whitespace) {
+    let email_options = Options::default()
+        .without_display_text()
+        .without_domain_literal()
+        .with_required_tld();
+    if email.len() > 254
+        || email.contains(char::is_whitespace)
+        || EmailAddress::parse_with_options(&email, email_options).is_err()
+    {
         return Err(AppError::BadRequest("Invalid email address".into()));
     }
 

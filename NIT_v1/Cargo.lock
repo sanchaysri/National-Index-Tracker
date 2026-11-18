@@ -311,6 +311,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "email_address"
+version = "0.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ab6bbd053d3cdc62ba3de82aae11530a97bbd5b3a572fbdbcd0f0e545e3ff21"
+
+[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -829,6 +835,7 @@ dependencies = [
  "argon2",
  "axum",
  "dotenvy",
+ "email_address",
  "rand_core 0.6.4",
  "serde",
  "serde_json",
