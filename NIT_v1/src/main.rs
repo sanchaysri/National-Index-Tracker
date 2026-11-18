@@ -1,3 +1,4 @@
+
 use nit_v1::{build_router, config::Config, db::connection::create_pool, state::AppState};
 
 #[tokio::main]
@@ -28,4 +29,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
-}
+
