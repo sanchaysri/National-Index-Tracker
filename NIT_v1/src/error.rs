@@ -9,6 +9,7 @@ use serde_json::json;
 pub enum AppError {
     BadRequest(String),
     Conflict(String),
+    Unauthorized,
     Internal,
 }
 
@@ -21,6 +22,11 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
                 "An unexpected error occurred".to_string(),
+            ),
+            AppError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "INVALID_CREDENTIALS",
+                "Invalid email or password".to_string(),
             ),
         };
 
