@@ -25,5 +25,6 @@ async fn health(State(state): State<AppState>) -> Result<Json<Value>, StatusCode
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
+        .merge(features::auth::routes::routes())
         .with_state(state)
 }
