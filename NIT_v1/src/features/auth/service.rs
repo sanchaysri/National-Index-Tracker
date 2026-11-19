@@ -140,7 +140,7 @@ mod tests {
     use super::role_destination;
 
     #[test]
-    fn admin_should_get_admin_dashboard() {
+    fn test_admin_dashboard() {
         // Arrange
         let is_admin = true;
 
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_user_should_get_user_dashboard() {
+    fn test_user_dashboard() {
         // Arrange
         let is_admin = false;
 
