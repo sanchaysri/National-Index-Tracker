@@ -1,4 +1,5 @@
 FROM rust
 WORKDIR /app
 COPY . .
-CMD ["cargo", "run"]
+RUN cargo build --locked --bin nit_v1
+CMD ["/app/target/debug/nit_v1"]
