@@ -1,4 +1,3 @@
-
 use nit_v1::{build_router, config::Config, db::connection::create_pool, state::AppState};
 
 #[tokio::main]
