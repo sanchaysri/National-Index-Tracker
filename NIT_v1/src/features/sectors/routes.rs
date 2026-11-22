@@ -1,4 +1,4 @@
-use axum::{Router, routing::get};
+use axum::{routing::get, Router};
 
 use crate::state::AppState;
 
@@ -11,7 +11,7 @@ pub fn routes() -> Router<AppState> {
             get(handler::list_interests).post(handler::create_interest),
         )
         .route(
-            "/api/v1/interest/{interest_id}",
+            "/api/v1/interests/{interest_id}",
             get(handler::get_interest).delete(handler::delete_interest),
         )
 }
