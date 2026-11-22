@@ -13,6 +13,7 @@ pub enum AppError {
     AlreadyLoggedOut,
     Unauthorized,
     InterestNotFound,
+    InterestInUse,
     Internal,
 }
 
@@ -35,6 +36,11 @@ impl IntoResponse for AppError {
                 StatusCode::NOT_FOUND,
                 "INTEREST_NOT_FOUND",
                 "Interest not found".to_string(),
+            ),
+            AppError::InterestInUse => (
+                StatusCode::CONFLICT,
+                "INTEREST_IN_USE",
+                "Interest cannot be deleted while related records still reference it".to_string(),
             ),
             AppError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,

@@ -9,6 +9,6 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/interests", get(handler::list_interests))
         .route(
             "/api/v1/interest/{interest_id}",
-            get(handler::get_interest),
+            get(handler::get_interest).delete(handler::delete_interest),
         )
 }

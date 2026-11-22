@@ -1,6 +1,7 @@
 use axum::{
     Json,
     extract::{Path, State},
+    http::StatusCode,
 };
 use tracing::{debug, info};
 
@@ -48,4 +49,27 @@ pub async fn get_interest(
     );
 
     Ok(Json(interest))
+}
+
+pub async fn delete_interest(
+    State(state): State<AppState>,
+    Path(interest_id): Path<i32>,
+) -> Result<StatusCode, AppError> {
+    debug!(
+        target: "nit_v1::sectors::interests",
+        event = "interest_delete_started",
+        interest_id,
+        "Deleting interest"
+    );
+
+    service::delete_interest(&state.db, interest_id).await?;
+
+    info!(
+        target: "nit_v1::sectors::interests",
+        event = "interest_delete_succeeded",
+        interest_id,
+        "Deleted interest"
+    );
+
+    Ok(StatusCode::NO_CONTENT)
 }

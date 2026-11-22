@@ -14,3 +14,12 @@ pub async fn get_interest(pool: &PgPool, interest_id: i32) -> Result<Option<Inte
         .fetch_optional(pool)
         .await
 }
+
+pub async fn delete_interest(pool: &PgPool, interest_id: i32) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM interests WHERE id = $1")
+        .bind(interest_id)
+        .execute(pool)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
