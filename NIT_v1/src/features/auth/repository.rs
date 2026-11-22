@@ -52,3 +52,23 @@ pub async fn find_user_by_email(
     .fetch_optional(pool)
     .await
 }
+
+pub async fn set_login_state(
+    pool: &PgPool,
+    user_id: i64,
+    is_logged_in: bool,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        r#"
+        UPDATE users
+        SET is_logged_in = $2
+        WHERE id = $1 AND is_logged_in <> $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(is_logged_in)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() == 1)
+}

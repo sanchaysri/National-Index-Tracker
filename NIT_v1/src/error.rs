@@ -9,6 +9,8 @@ use serde_json::json;
 pub enum AppError {
     BadRequest(String),
     Conflict(String),
+    AlreadyLoggedIn,
+    AlreadyLoggedOut,
     Unauthorized,
     Internal,
 }
@@ -18,6 +20,16 @@ impl IntoResponse for AppError {
         let (status, code, message) = match self {
             AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", message),
             AppError::Conflict(message) => (StatusCode::CONFLICT, "EMAIL_ALREADY_EXISTS", message),
+            AppError::AlreadyLoggedIn => (
+                StatusCode::CONFLICT,
+                "ALREADY_LOGGED_IN",
+                "Already logged in".to_string(),
+            ),
+            AppError::AlreadyLoggedOut => (
+                StatusCode::CONFLICT,
+                "ALREADY_LOGGED_OUT",
+                "Already logged out".to_string(),
+            ),
             AppError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",

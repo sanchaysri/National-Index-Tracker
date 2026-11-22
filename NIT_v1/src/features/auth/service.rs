@@ -9,7 +9,10 @@ use tracing::{debug, error, info, warn};
 use crate::error::AppError;
 
 use super::{
-    model::{LoginRequest, LoginResponse, RegisterRequest, RegisterResponse},
+    model::{
+        LoginRequest, LoginResponse, LogoutResponse, RegisterRequest, RegisterResponse,
+        UserAuthRecord,
+    },
     repository,
 };
 
@@ -174,96 +177,123 @@ fn role_destination(is_admin: bool) -> (&'static str, &'static str) {
 }
 
 // ========================================
-// LOGIN SERVICE
+// CREDENTIAL VERIFICATION
 // ========================================
 
-pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginResponse, AppError> {
-    // DEBUG 1: Start user lookup
+async fn verify_credentials(
+    pool: &PgPool,
+    request: LoginRequest,
+    operation: &'static str,
+) -> Result<UserAuthRecord, AppError> {
     debug!(
-        target: "nit_v1::auth::login",
-        event = "login_user_lookup",
-        "Looking up user for login"
+        target: "nit_v1::auth::credentials",
+        event = "user_lookup",
+        operation,
+        "Looking up user"
     );
 
-    // Step 1: Normalize email
-    let email = request.email.trim().to_lowercase();
+    let LoginRequest { email, password } = request;
+    let email = email.trim().to_lowercase();
 
-    // Step 2: Find user in PostgreSQL
     let user = repository::find_user_by_email(pool, &email)
         .await
         .map_err(|_| {
             error!(
-                target: "nit_v1::auth::login",
-                event = "login_db_error",
-                "Unexpected database error during login"
+                target: "nit_v1::auth::credentials",
+                event = "user_lookup_failed",
+                operation,
+                "Could not look up user"
             );
 
             AppError::Internal
         })?;
 
-    // Step 3: Check whether user exists
     let Some(user) = user else {
         warn!(
-            target: "nit_v1::auth::login",
-            event = "login_invalid_credentials",
-            "Login rejected due to invalid credentials"
+            target: "nit_v1::auth::credentials",
+            event = "invalid_credentials",
+            operation,
+            "Authentication rejected due to invalid credentials"
         );
 
         return Err(AppError::Unauthorized);
     };
 
-    // DEBUG 2: Start password verification
     debug!(
-        target: "nit_v1::auth::login",
-        event = "login_password_verification",
-        "Verifying login password"
+        target: "nit_v1::auth::credentials",
+        event = "password_verification",
+        operation,
+        "Verifying password"
     );
 
-    // Step 4: Move owned data into blocking task
-    let password = request.password;
-    let stored_hash = user.password_hash;
-
-    // Step 5: Verify password using Argon2
-    let password_valid = tokio::task::spawn_blocking(move || {
-        let parsed_hash = PasswordHash::new(&stored_hash).map_err(|_| {
+    let (user, password_valid) = tokio::task::spawn_blocking(move || {
+        let parsed_hash = PasswordHash::new(&user.password_hash).map_err(|_| {
             error!(
-                target: "nit_v1::auth::login",
-                event = "login_hash_error",
+                target: "nit_v1::auth::credentials",
+                event = "password_hash_error",
+                operation,
                 "Stored password hash could not be parsed"
             );
 
             AppError::Internal
         })?;
 
-        Ok::<bool, AppError>(
-            Argon2::default()
-                .verify_password(password.as_bytes(), &parsed_hash)
-                .is_ok(),
-        )
+        let password_valid = Argon2::default()
+            .verify_password(password.as_bytes(), &parsed_hash)
+            .is_ok();
+        Ok::<_, AppError>((user, password_valid))
     })
     .await
     .map_err(|_| {
         error!(
-            target: "nit_v1::auth::login",
-            event = "login_verification_task_error",
-            "Login password verification task failed"
+            target: "nit_v1::auth::credentials",
+            event = "password_verification_task_error",
+            operation,
+            "Password verification task failed"
         );
 
         AppError::Internal
     })??;
 
-    // Step 6: Check password validity
     if !password_valid {
         warn!(
-            target: "nit_v1::auth::login",
-            event = "login_invalid_credentials",
-            "Login rejected due to invalid credentials"
+            target: "nit_v1::auth::credentials",
+            event = "invalid_credentials",
+            operation,
+            "Authentication rejected due to invalid credentials"
         );
 
         return Err(AppError::Unauthorized);
     }
 
-    // Step 7: Determine user role
+    Ok(user)
+}
+
+pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginResponse, AppError> {
+    let user = verify_credentials(pool, request, "login").await?;
+
+    let login_state_changed = repository::set_login_state(pool, user.id, true)
+        .await
+        .map_err(|_| {
+            error!(
+                target: "nit_v1::auth::login",
+                event = "login_state_update_failed",
+                user_id = user.id,
+                "Could not update the account login state"
+            );
+            AppError::Internal
+        })?;
+
+    if !login_state_changed {
+        warn!(
+            target: "nit_v1::auth::login",
+            event = "login_already_logged_in",
+            user_id = user.id,
+            "Login rejected because the account is already logged in"
+        );
+        return Err(AppError::AlreadyLoggedIn);
+    }
+
     let (role, redirect_to) = role_destination(user.is_admin);
 
     info!(
@@ -276,11 +306,49 @@ pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginRes
         "User logged in successfully"
     );
 
-    // Step 8: Return login response
     Ok(LoginResponse {
         message: "Logged in".to_string(),
         role: role.to_string(),
         redirect_to: redirect_to.to_string(),
+    })
+}
+
+pub async fn logout_user(pool: &PgPool, request: LoginRequest) -> Result<LogoutResponse, AppError> {
+    let user = verify_credentials(pool, request, "logout").await?;
+
+    let login_state_changed = repository::set_login_state(pool, user.id, false)
+        .await
+        .map_err(|_| {
+            error!(
+                target: "nit_v1::auth::logout",
+                event = "logout_state_update_failed",
+                user_id = user.id,
+                "Could not update the account login state"
+            );
+            AppError::Internal
+        })?;
+
+    if !login_state_changed {
+        warn!(
+            target: "nit_v1::auth::logout",
+            event = "logout_already_logged_out",
+            user_id = user.id,
+            "Logout rejected because the account is already logged out"
+        );
+        return Err(AppError::AlreadyLoggedOut);
+    }
+
+    info!(
+        target: "nit_v1::auth::logout",
+        event = "logout_success",
+        user_id = user.id,
+        name = %user.name,
+        email = %user.email,
+        "User logged out successfully"
+    );
+
+    Ok(LogoutResponse {
+        message: "Logged out".to_string(),
     })
 }
 

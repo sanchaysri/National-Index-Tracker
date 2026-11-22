@@ -4,7 +4,10 @@ use tracing::info;
 use crate::{error::AppError, state::AppState};
 
 use super::{
-    model::{DataResponse, LoginRequest, LoginResponse, RegisterRequest, RegisterResponse},
+    model::{
+        DataResponse, LoginRequest, LoginResponse, LogoutResponse, RegisterRequest,
+        RegisterResponse,
+    },
     service,
 };
 
@@ -58,6 +61,20 @@ pub async fn login(
     let response = service::login_user(&state.db, request).await?;
 
     // INFO: Login successful
+    Ok(Json(DataResponse { data: response }))
+}
+
+pub async fn logout(
+    State(state): State<AppState>,
+    Json(request): Json<LoginRequest>,
+) -> Result<Json<DataResponse<LogoutResponse>>, AppError> {
+    info!(
+        target: "nit_v1::auth::logout",
+        event = "logout_started",
+        "Logout request received"
+    );
+
+    let response = service::logout_user(&state.db, request).await?;
     Ok(Json(DataResponse { data: response }))
 }
 
