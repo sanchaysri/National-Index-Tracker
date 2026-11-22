@@ -1,0 +1,4 @@
+{
+    "error": "Authorization field missing"
+}
+HTTP status: 400

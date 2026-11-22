@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My profile | National Growth Index Tracker</title>
+
+  <style>
+    body {
+      margin: 0;
+      background: #f4f7fb;
+      color: #172b40;
+      font-family: system-ui, sans-serif;
+    }
+
+    header {
+      padding: 16px 24px;
+      background: #163b64;
+      color: white;
+      font-weight: 600;
+    }
+
+    main {
+      max-width: 720px;
+      margin: 24px auto;
+      padding: 0 16px;
+    }
+
+    section {
+      margin-bottom: 16px;
+      padding: 20px;
+      border: 1px solid #d8e2ec;
+      border-radius: 8px;
+      background: white;
+    }
+
+    h2 {
+      margin-top: 0;
+    }
+
+    dt {
+      font-weight: 600;
+    }
+
+    dd {
+      margin: 0 0 12px;
+    }
+
+    .button-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      padding: 8px 14px;
+      border: 1px solid #164578;
+      border-radius: 6px;
+      background: white;
+      color: #164578;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button[aria-pressed="true"] {
+      background: #164578;
+      color: white;
+    }
+  </style>
+</head>
+
+<body>
+  <header>National Growth Index Tracker</header>
+
+  <main>
+    <h1>My profile</h1>
+
+    <section aria-label="Profile details">
+      <dl>
+        <dt>Name</dt>
+        <dd>Arshad (sample)</dd>
+        <dt>Email</dt>
+        <dd>arshad@example.com (sample)</dd>
+      </dl>
+    </section>
+
+    <section>
+      <h2>My interests</h2>
+      <div id="interest-buttons" class="button-group"></div>
+      <p id="interest-message" role="status">Loading interests…</p>
+    </section>
+
+    <section>
+      <h2 id="indices-heading">Indices</h2>
+      <div id="index-buttons" class="button-group"></div>
+      <p id="index-result" role="status">Select an interest to see its indices.</p>
+    </section>
+  </main>
+
+  <script>
+    const interestButtons = document.getElementById("interest-buttons");
+    const interestMessage = document.getElementById("interest-message");
+    const indexButtons = document.getElementById("index-buttons");
+    const indicesHeading = document.getElementById("indices-heading");
+    const indexResult = document.getElementById("index-result");
+
+    let latestInterestRequest = 0;
+
+    function selectButton(container, selectedButton) {
+      for (const button of container.children) {
+        button.setAttribute("aria-pressed", String(button === selectedButton));
+      }
+    }
+
+    async function showIndices(interest) {
+      const requestNumber = ++latestInterestRequest;
+      indexButtons.replaceChildren();
+      indicesHeading.textContent = `Indices for ${interest.name}`;
+      indexResult.textContent = "Loading indices…";
+
+      try {
+        const response = await fetch(
+          `/api/v1/interests/${encodeURIComponent(interest.id)}/indices`
+        );
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const indices = await response.json();
+
+        if (requestNumber !== latestInterestRequest) {
+          return;
+        }
+
+        indexResult.textContent = indices.length
+          ? "Select an index to see its value."
+          : "No indices found for this interest.";
+
+        for (const index of indices) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = index.name;
+          button.setAttribute("aria-pressed", "false");
+
+          button.addEventListener("click", () => {
+            selectButton(indexButtons, button);
+            const unit = index.unit || "";
+            const period = index.period || "Not available";
+            indexResult.textContent =
+              `${interest.name} — ${index.name}: ${index.value}${unit}. Period: ${period}`;
+          });
+
+          indexButtons.appendChild(button);
+        }
+      } catch (error) {
+        if (requestNumber === latestInterestRequest) {
+          indexResult.textContent = `Could not load indices: ${error.message}`;
+        }
+      }
+    }
+
+    async function loadInterests() {
+      try {
+        const response = await fetch("/api/v1/interests");
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const interests = await response.json();
+        interestMessage.textContent = interests.length
+          ? ""
+          : "No interests found.";
+
+        for (const interest of interests) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = interest.name;
+          button.setAttribute("aria-pressed", "false");
+
+          button.addEventListener("click", () => {
+            selectButton(interestButtons, button);
+            showIndices(interest);
+          });
+
+          interestButtons.appendChild(button);
+        }
+      } catch (error) {
+        interestMessage.textContent = `Could not load interests: ${error.message}`;
+      }
+    }
+
+    loadInterests();
+  </script>
+</body>
+</html>

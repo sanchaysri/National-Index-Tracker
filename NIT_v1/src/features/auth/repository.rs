@@ -1,12 +1,22 @@
 use super::model::{UserAuthRecord, UserRecord};
 use sqlx::PgPool;
+use tracing::trace;
 
+// Insert a new registered user into PostgreSQL
 pub async fn insert_user(
     pool: &PgPool,
     name: &str,
     email: &str,
     password_hash: &str,
 ) -> Result<UserRecord, sqlx::Error> {
+    // TRACE: Registration database query started
+    trace!(
+        event = "registration_db_query_started",
+        table = "users",
+        operation = "INSERT",
+        "Executing user registration database query"
+    );
+
     sqlx::query_as::<_, UserRecord>(
         r#"
         INSERT INTO users (name, email, password_hash)
@@ -21,6 +31,7 @@ pub async fn insert_user(
     .await
 }
 
+// Find a user by email for login
 pub async fn find_user_by_email(
     pool: &PgPool,
     email: &str,

@@ -1,4 +1,5 @@
 use axum::{Json, extract::State, http::StatusCode};
+use tracing::info;
 
 use crate::{error::AppError, state::AppState};
 
@@ -7,23 +8,66 @@ use super::{
     service,
 };
 
+// ========================================
+// REGISTRATION HANDLER
+// ========================================
+
 pub async fn register(
     State(state): State<AppState>,
     Json(request): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<DataResponse<RegisterResponse>>), AppError> {
+    // INFO: Registration request received
+    info!(
+        target: "nit_v1::auth::registration",
+        event = "registration_started",
+        "Registration request received"
+    );
+
+    // Call registration service
     let user = service::register_user(&state.db, request).await?;
+
+    // INFO: Registration successful
+    info!(
+        target: "nit_v1::auth::registration",
+        event = "registration_success",
+        user_id = user.id,
+        "User registered successfully"
+    );
 
     Ok((StatusCode::CREATED, Json(DataResponse { data: user })))
 }
+
+// ========================================
+// LOGIN HANDLER
+// ========================================
 
 pub async fn login(
     State(state): State<AppState>,
     Json(request): Json<LoginRequest>,
 ) -> Result<Json<DataResponse<LoginResponse>>, AppError> {
+    // INFO: Login request received
+    info!(
+        target: "nit_v1::auth::login",
+        event = "login_started",
+        "Login request received"
+    );
+
+    // Call login service
     let response = service::login_user(&state.db, request).await?;
+
+    // INFO: Login successful
+    info!(
+        target: "nit_v1::auth::login",
+        event = "login_success",
+        "User logged in successfully"
+    );
 
     Ok(Json(DataResponse { data: response }))
 }
+
+// ========================================
+// UNIT TESTS
+// ========================================
 
 #[cfg(test)]
 mod tests {
@@ -51,6 +95,7 @@ mod tests {
             .fetch_one(&pool)
             .await
             .expect("registered user should exist in the test table");
+
         assert_eq!(response.data.id, stored_id);
     }
 
@@ -74,7 +119,6 @@ mod tests {
     }
 
     #[tokio::test]
-
     async fn test_register_name_failure() {
         let mock_state = AppState {
             db: sqlx::PgPool::connect_lazy("postgres://user:password@localhost/test_db").unwrap(),
