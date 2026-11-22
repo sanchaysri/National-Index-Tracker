@@ -38,12 +38,12 @@ pub fn build_router(state: AppState) -> Router {
             "/profile",
             get(|| async { axum::response::Html(include_str!("../frontend/profile.html")) }),
         )
-        .route("/api/v1/interests", get(interests::list_interests))
         .route(
             "/api/v1/interests/{interest_id}/indices",
             get(interests::list_interest_indices),
         )
         .merge(features::auth::routes::routes())
+        .merge(features::sectors::routes::routes())
         .layer(axum::middleware::from_fn(log_request))
         .with_state(state)
 }
