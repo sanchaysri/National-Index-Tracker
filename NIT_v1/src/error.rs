@@ -13,6 +13,7 @@ pub enum AppError {
     AlreadyLoggedOut,
     Unauthorized,
     InterestNotFound,
+    InterestAlreadyExists,
     InterestInUse,
     Internal,
 }
@@ -36,6 +37,11 @@ impl IntoResponse for AppError {
                 StatusCode::NOT_FOUND,
                 "INTEREST_NOT_FOUND",
                 "Interest not found".to_string(),
+            ),
+            AppError::InterestAlreadyExists => (
+                StatusCode::CONFLICT,
+                "INTEREST_ALREADY_EXISTS",
+                "An interest with that name already exists".to_string(),
             ),
             AppError::InterestInUse => (
                 StatusCode::CONFLICT,

@@ -2,6 +2,23 @@ use sqlx::PgPool;
 
 use super::model::Interest;
 
+pub async fn create_interest(
+    pool: &PgPool,
+    name: &str,
+    description: Option<&str>,
+) -> Result<Option<Interest>, sqlx::Error> {
+    sqlx::query_as::<_, Interest>(
+        "INSERT INTO interests (name, description)
+         VALUES ($1, $2)
+         ON CONFLICT (name) DO NOTHING
+         RETURNING id, name, description",
+    )
+    .bind(name)
+    .bind(description)
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn list_interests(pool: &PgPool) -> Result<Vec<Interest>, sqlx::Error> {
     sqlx::query_as::<_, Interest>("SELECT id, name, description FROM interests ORDER BY id")
         .fetch_all(pool)

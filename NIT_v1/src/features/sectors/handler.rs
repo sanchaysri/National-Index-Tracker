@@ -7,7 +7,32 @@ use tracing::{debug, info};
 
 use crate::{error::AppError, state::AppState};
 
-use super::{model::Interest, service};
+use super::{
+    model::{CreateInterestRequest, Interest},
+    service,
+};
+
+pub async fn create_interest(
+    State(state): State<AppState>,
+    Json(request): Json<CreateInterestRequest>,
+) -> Result<(StatusCode, Json<Interest>), AppError> {
+    debug!(
+        target: "nit_v1::sectors::interests",
+        event = "interest_create_started",
+        "Creating interest"
+    );
+
+    let interest = service::create_interest(&state.db, request).await?;
+
+    info!(
+        target: "nit_v1::sectors::interests",
+        event = "interest_create_succeeded",
+        interest_id = interest.id,
+        "Created interest"
+    );
+
+    Ok((StatusCode::CREATED, Json(interest)))
+}
 
 pub async fn list_interests(State(state): State<AppState>) -> Result<Json<Vec<Interest>>, AppError> {
     debug!(
