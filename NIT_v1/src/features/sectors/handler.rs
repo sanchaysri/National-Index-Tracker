@@ -1,4 +1,7 @@
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use tracing::{debug, info};
 
 use crate::{error::AppError, state::AppState};
@@ -22,4 +25,27 @@ pub async fn list_interests(State(state): State<AppState>) -> Result<Json<Vec<In
     );
 
     Ok(Json(interests))
+}
+
+pub async fn get_interest(
+    State(state): State<AppState>,
+    Path(interest_id): Path<i32>,
+) -> Result<Json<Interest>, AppError> {
+    debug!(
+        target: "nit_v1::sectors::interests",
+        event = "interest_get_started",
+        interest_id,
+        "Looking up interest"
+    );
+
+    let interest = service::get_interest(&state.db, interest_id).await?;
+
+    info!(
+        target: "nit_v1::sectors::interests",
+        event = "interest_get_succeeded",
+        interest_id,
+        "Retrieved interest"
+    );
+
+    Ok(Json(interest))
 }

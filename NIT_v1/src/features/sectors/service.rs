@@ -1,5 +1,5 @@
 use sqlx::PgPool;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::error::AppError;
 
@@ -15,6 +15,36 @@ pub async fn list_interests(pool: &PgPool) -> Result<Vec<Interest>, AppError> {
         );
         AppError::Internal
     })
+}
+
+pub async fn get_interest(pool: &PgPool, interest_id: i32) -> Result<Interest, AppError> {
+    repository::get_interest(pool, interest_id)
+        .await
+        .map_err(|_| interest_db_error("get", interest_id))?
+        .ok_or_else(|| interest_not_found("get", interest_id))
+}
+
+fn interest_not_found(operation: &'static str, interest_id: i32) -> AppError {
+    warn!(
+        target: "nit_v1::sectors::interests",
+        event = "interest_not_found",
+        operation,
+        interest_id,
+        "Interest does not exist"
+    );
+    AppError::InterestNotFound
+}
+
+fn interest_db_error(operation: &'static str, interest_id: i32) -> AppError {
+    error!(
+        target: "nit_v1::sectors::interests",
+        event = "interest_db_error",
+        error_kind = "database_operation_failed",
+        operation,
+        interest_id,
+        "Interest database operation failed"
+    );
+    AppError::Internal
 }
 
 #[cfg(test)]
@@ -52,6 +82,20 @@ mod tests {
         assert!(interests.is_empty());
     }
 
+    #[sqlx::test(migrations = "./migrations")]
+    async fn gets_only_the_requested_interest(pool: PgPool) {
+        seed_interests(&pool).await;
+
+        let interest = get_interest(&pool, 10).await.expect("get interest");
+        assert_eq!(interest.id, 10);
+        assert_eq!(interest.name, "Health");
+        assert_eq!(interest.description.as_deref(), Some("Healthcare indicators"));
+        assert!(matches!(
+            get_interest(&pool, 999).await,
+            Err(AppError::InterestNotFound)
+        ));
+    }
+
     #[tokio::test]
     async fn returns_an_internal_error_when_the_pool_is_closed() {
         let pool = PgPool::connect_lazy("postgres://user:password@localhost/test_db")
@@ -59,6 +103,10 @@ mod tests {
         pool.close().await;
 
         assert!(matches!(list_interests(&pool).await, Err(AppError::Internal)));
+        assert!(matches!(
+            get_interest(&pool, 10).await,
+            Err(AppError::Internal)
+        ));
     }
 
     async fn seed_interests(pool: &PgPool) {
