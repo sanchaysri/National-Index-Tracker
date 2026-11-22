@@ -6,8 +6,16 @@ pub mod interests;
 pub mod middleware;
 pub mod state;
 
-use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
+use axum::{
+    Json, Router,
+    extract::{MatchedPath, Request, State},
+    http::StatusCode,
+    middleware::Next,
+    response::Response,
+    routing::get,
+};
 use serde_json::{Value, json};
+use std::time::Instant;
 
 use state::AppState;
 
@@ -36,5 +44,24 @@ pub fn build_router(state: AppState) -> Router {
             get(interests::list_interest_indices),
         )
         .merge(features::auth::routes::routes())
+        .layer(axum::middleware::from_fn(log_request))
         .with_state(state)
+}
+
+async fn log_request(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let route = request.extensions().get::<MatchedPath>().cloned();
+    let started_at = Instant::now();
+    let response = next.run(request).await;
+
+    tracing::info!(
+        event = "http_request_completed",
+        %method,
+        route = route.as_ref().map_or("<unmatched>", MatchedPath::as_str),
+        status = response.status().as_u16(),
+        duration_ms = started_at.elapsed().as_secs_f64() * 1_000.0,
+        "HTTP request completed"
+    );
+
+    response
 }

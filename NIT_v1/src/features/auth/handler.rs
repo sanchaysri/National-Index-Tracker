@@ -31,6 +31,8 @@ pub async fn register(
         target: "nit_v1::auth::registration",
         event = "registration_success",
         user_id = user.id,
+        name = %user.name,
+        email = %user.email,
         "User registered successfully"
     );
 
@@ -56,12 +58,6 @@ pub async fn login(
     let response = service::login_user(&state.db, request).await?;
 
     // INFO: Login successful
-    info!(
-        target: "nit_v1::auth::login",
-        event = "login_success",
-        "User logged in successfully"
-    );
-
     Ok(Json(DataResponse { data: response }))
 }
 

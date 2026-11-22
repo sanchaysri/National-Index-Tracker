@@ -4,7 +4,7 @@ use argon2::{
 };
 use email_address::{EmailAddress, Options};
 use sqlx::PgPool;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::error::AppError;
 
@@ -265,6 +265,16 @@ pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginRes
 
     // Step 7: Determine user role
     let (role, redirect_to) = role_destination(user.is_admin);
+
+    info!(
+        target: "nit_v1::auth::login",
+        event = "login_success",
+        user_id = user.id,
+        name = %user.name,
+        email = %user.email,
+        role,
+        "User logged in successfully"
+    );
 
     // Step 8: Return login response
     Ok(LoginResponse {
