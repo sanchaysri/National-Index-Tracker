@@ -1,14 +1,25 @@
 services:
   backend:
+    image: nit-v1-backend:local
     build:
       context: .
     environment:
-      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      DATABASE_URL: &database_url "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
       RUST_LOG: "nit_v1=trace"
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
       - ./logs:/app/logs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    image: nit-v1-backend:local
+    pull_policy: never
+    command: ["sqlx", "migrate", "run"]
+    environment:
+      DATABASE_URL: *database_url
     depends_on:
       db:
         condition: service_healthy
