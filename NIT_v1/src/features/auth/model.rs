@@ -48,6 +48,11 @@ pub struct LoginResponse {
     pub redirect_to: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct LogoutResponse {
+    pub message: String,
+}
+
 // Common success response wrapper
 #[derive(Debug, Serialize)]
 pub struct DataResponse<T> {
