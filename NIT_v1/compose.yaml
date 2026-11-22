@@ -13,6 +13,20 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    develop:
+      watch:
+        - action: rebuild
+          path: ./src
+        - action: rebuild
+          path: ./frontend
+        - action: rebuild
+          path: ./migrations
+        - action: rebuild
+          path: ./Cargo.toml
+        - action: rebuild
+          path: ./Cargo.lock
+        - action: rebuild
+          path: ./Dockerfile
 
   migrate:
     image: nit-v1-backend:local
