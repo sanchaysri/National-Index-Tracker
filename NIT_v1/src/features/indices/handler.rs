@@ -11,6 +11,16 @@ use super::{
 };
 use crate::{error::AppError, state::AppState};
 
+pub async fn get_index(
+    State(state): State<AppState>,
+    Path(index_id): Path<i32>,
+) -> Result<Json<Index>, AppError> {
+    debug!(target: "nit_v1::indices", event = "index_get_started", index_id, "Fetching index");
+    let index = service::get_index(&state.db, index_id).await?;
+    info!(target: "nit_v1::indices", event = "index_get_succeeded", index_id, "Fetched index");
+    Ok(Json(index))
+}
+
 pub async fn list_for_interest(
     State(state): State<AppState>,
     Path(interest_id): Path<i32>,

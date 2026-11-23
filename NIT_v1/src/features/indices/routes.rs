@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    routing::{delete, get, post},
+    routing::{get, post},
 };
 
 use super::handler;
@@ -13,5 +13,8 @@ pub fn routes() -> Router<AppState> {
             get(handler::list_for_interest),
         )
         .route("/api/v1/indices", post(handler::create_index))
-        .route("/api/v1/indices/{index_id}", delete(handler::delete_index))
+        .route(
+            "/api/v1/indices/{index_id}",
+            get(handler::get_index).delete(handler::delete_index),
+        )
 }
