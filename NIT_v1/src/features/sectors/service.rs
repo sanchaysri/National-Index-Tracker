@@ -220,8 +220,21 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn deletes_only_the_requested_interest(pool: PgPool) {
         seed_interests(&pool).await;
+        sqlx::query(
+            "INSERT INTO indices (id, interest_id, name)
+             VALUES (1, 10, 'Admissions'), (2, 10, 'Beds'), (3, 20, 'Solar')",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed indices for both interests");
 
         delete_interest(&pool, 10).await.expect("delete interest");
+
+        let remaining_indices: Vec<i32> = sqlx::query_scalar("SELECT id FROM indices")
+            .fetch_all(&pool)
+            .await
+            .expect("list remaining indices");
+        assert_eq!(remaining_indices, [3]);
 
         let interests = list_interests(&pool)
             .await

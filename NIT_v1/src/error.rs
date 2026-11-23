@@ -15,6 +15,8 @@ pub enum AppError {
     InterestNotFound,
     InterestAlreadyExists,
     InterestInUse,
+    IndexNotFound,
+    IndexInUse,
     Internal,
 }
 
@@ -52,6 +54,16 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
                 "An unexpected error occurred".to_string(),
+            ),
+            AppError::IndexNotFound => (
+                StatusCode::NOT_FOUND,
+                "INDEX_NOT_FOUND",
+                "Index not found".to_string(),
+            ),
+            AppError::IndexInUse => (
+                StatusCode::CONFLICT,
+                "INDEX_IN_USE",
+                "Related records prevent index deletion".to_string(),
             ),
             AppError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,

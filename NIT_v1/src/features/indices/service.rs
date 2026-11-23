@@ -52,6 +52,24 @@ pub async fn create_index(pool: &PgPool, request: CreateIndexRequest) -> Result<
     })
 }
 
+pub async fn delete_index(pool: &PgPool, index_id: i32) -> Result<(), AppError> {
+    match repository::delete_index(pool, index_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            warn!(target: "nit_v1::indices", event = "index_delete_not_found", index_id, "Index does not exist");
+            Err(AppError::IndexNotFound)
+        }
+        Err(sqlx::Error::Database(err)) if err.is_foreign_key_violation() => {
+            warn!(target: "nit_v1::indices", event = "index_delete_conflict", index_id, "Related records prevent index deletion");
+            Err(AppError::IndexInUse)
+        }
+        Err(_) => {
+            error!(target: "nit_v1::indices", event = "index_delete_db_error", index_id, "Could not delete index");
+            Err(AppError::Internal)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +122,30 @@ mod tests {
         pool.close().await;
         let result = create_index(&pool, request(1, "  ")).await;
         assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn deletes_only_the_requested_index(pool: PgPool) {
+        sqlx::query("INSERT INTO interests (id, name) VALUES (10, 'Energy')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO indices (id, interest_id, name) VALUES (1, 10, 'Solar'), (2, 10, 'Wind')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        delete_index(&pool, 1).await.expect("delete Solar");
+        let remaining: Vec<i32> = sqlx::query_scalar("SELECT id FROM indices")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, [2]);
+        assert!(matches!(
+            delete_index(&pool, 1).await,
+            Err(AppError::IndexNotFound)
+        ));
     }
 }
