@@ -40,17 +40,24 @@ pub struct UserAuthRecord {
     pub is_admin: bool,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginResponse {
     pub message: String,
     pub role: String,
     pub redirect_to: String,
+    pub access_token: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct LogoutResponse {
     pub message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RefreshResponse {
+    pub access_token: String,
 }
 
 // Common success response wrapper

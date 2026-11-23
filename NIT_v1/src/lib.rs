@@ -10,7 +10,7 @@ use axum::{
     Json, Router,
     extract::{MatchedPath, Request, State},
     http::StatusCode,
-    middleware::Next,
+    middleware::{Next, from_fn_with_state},
     response::Response,
     routing::get,
 };
@@ -32,19 +32,26 @@ async fn health(State(state): State<AppState>) -> Result<Json<Value>, StatusCode
 }
 
 pub fn build_router(state: AppState) -> Router {
+    let protected_routes = Router::new()
+        .route(
+            "/api/v1/interests/{interest_id}/indices",
+            get(interests::list_interest_indices),
+        )
+        .merge(features::indices::routes::routes())
+        .merge(features::sectors::routes::routes())
+        .route_layer(from_fn_with_state(
+            state.clone(),
+            middleware::auth::require_access_token,
+        ));
+
     Router::new()
         .route("/api/v1/health", get(health))
         .route(
             "/profile",
             get(|| async { axum::response::Html(include_str!("../frontend/profile.html")) }),
         )
-        .route(
-            "/api/v1/interests/{interest_id}/indices",
-            get(interests::list_interest_indices),
-        )
         .merge(features::auth::routes::routes())
-        .merge(features::indices::routes::routes())
-        .merge(features::sectors::routes::routes())
+        .merge(protected_routes)
         .layer(axum::middleware::from_fn(log_request))
         .with_state(state)
 }

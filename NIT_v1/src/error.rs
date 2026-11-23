@@ -1,7 +1,7 @@
 use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response},
     Json,
+    http::{HeaderValue, StatusCode, header::WWW_AUTHENTICATE},
+    response::{IntoResponse, Response},
 };
 use serde_json::json;
 
@@ -10,8 +10,9 @@ pub enum AppError {
     BadRequest(String),
     Conflict(String),
     AlreadyLoggedIn,
-    AlreadyLoggedOut,
     Unauthorized,
+    InvalidAccessToken,
+    InvalidRefreshToken,
     InterestNotFound,
     InterestAlreadyExists,
     InterestInUse,
@@ -22,6 +23,7 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        let bearer_challenge = matches!(self, AppError::InvalidAccessToken);
         let (status, code, message) = match self {
             AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", message),
             AppError::Conflict(message) => (StatusCode::CONFLICT, "EMAIL_ALREADY_EXISTS", message),
@@ -29,11 +31,6 @@ impl IntoResponse for AppError {
                 StatusCode::CONFLICT,
                 "ALREADY_LOGGED_IN",
                 "Already logged in".to_string(),
-            ),
-            AppError::AlreadyLoggedOut => (
-                StatusCode::CONFLICT,
-                "ALREADY_LOGGED_OUT",
-                "Already logged out".to_string(),
             ),
             AppError::InterestNotFound => (
                 StatusCode::NOT_FOUND,
@@ -70,6 +67,16 @@ impl IntoResponse for AppError {
                 "INVALID_CREDENTIALS",
                 "Invalid email or password".to_string(),
             ),
+            AppError::InvalidAccessToken => (
+                StatusCode::UNAUTHORIZED,
+                "INVALID_ACCESS_TOKEN",
+                "A valid access token is required".to_string(),
+            ),
+            AppError::InvalidRefreshToken => (
+                StatusCode::UNAUTHORIZED,
+                "INVALID_REFRESH_TOKEN",
+                "A valid refresh token is required".to_string(),
+            ),
         };
 
         let body = Json(json!({
@@ -79,6 +86,12 @@ impl IntoResponse for AppError {
             }
         }));
 
-        (status, body).into_response()
+        let mut response = (status, body).into_response();
+        if bearer_challenge {
+            response
+                .headers_mut()
+                .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        }
+        response
     }
 }

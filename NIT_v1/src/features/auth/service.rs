@@ -3,6 +3,8 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use email_address::{EmailAddress, Options};
+use rand_core::RngCore;
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use tracing::{debug, error, info, warn};
 
@@ -10,8 +12,8 @@ use crate::error::AppError;
 
 use super::{
     model::{
-        LoginRequest, LoginResponse, LogoutResponse, RegisterRequest, RegisterResponse,
-        UserAuthRecord,
+        LoginRequest, LoginResponse, LogoutResponse, RefreshResponse, RegisterRequest,
+        RegisterResponse, UserAuthRecord,
     },
     repository,
 };
@@ -269,22 +271,51 @@ async fn verify_credentials(
     Ok(user)
 }
 
-pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginResponse, AppError> {
+const ACCESS_TTL_SECONDS: i32 = 15 * 60;
+pub(super) const REFRESH_TTL_SECONDS: i32 = 7 * 24 * 60 * 60;
+
+fn generate_session_token() -> Result<String, AppError> {
+    let mut bytes = [0_u8; 32];
+    OsRng.try_fill_bytes(&mut bytes).map_err(|_| {
+        error!(
+            event = "session_token_generation_failed",
+            "Could not generate session token"
+        );
+        AppError::Internal
+    })?;
+    Ok(hex::encode(bytes))
+}
+
+pub async fn login_user(
+    pool: &PgPool,
+    request: LoginRequest,
+) -> Result<(LoginResponse, String), AppError> {
     let user = verify_credentials(pool, request, "login").await?;
+    let access_token = generate_session_token()?;
+    let refresh_token = generate_session_token()?;
+    let access_token_hash = Sha256::digest(access_token.as_bytes());
+    let refresh_token_hash = Sha256::digest(refresh_token.as_bytes());
 
-    let login_state_changed = repository::set_login_state(pool, user.id, true)
-        .await
-        .map_err(|_| {
-            error!(
-                target: "nit_v1::auth::login",
-                event = "login_state_update_failed",
-                user_id = user.id,
-                "Could not update the account login state"
-            );
-            AppError::Internal
-        })?;
+    let session_created = repository::create_session(
+        pool,
+        user.id,
+        &access_token_hash,
+        &refresh_token_hash,
+        ACCESS_TTL_SECONDS,
+        REFRESH_TTL_SECONDS,
+    )
+    .await
+    .map_err(|_| {
+        error!(
+            target: "nit_v1::auth::login",
+            event = "session_creation_failed",
+            user_id = user.id,
+            "Could not create the login session"
+        );
+        AppError::Internal
+    })?;
 
-    if !login_state_changed {
+    if !session_created {
         warn!(
             target: "nit_v1::auth::login",
             event = "login_already_logged_in",
@@ -306,44 +337,68 @@ pub async fn login_user(pool: &PgPool, request: LoginRequest) -> Result<LoginRes
         "User logged in successfully"
     );
 
-    Ok(LoginResponse {
+    let response = LoginResponse {
         message: "Logged in".to_string(),
         role: role.to_string(),
         redirect_to: redirect_to.to_string(),
-    })
+        access_token,
+    };
+    Ok((response, refresh_token))
 }
 
-pub async fn logout_user(pool: &PgPool, request: LoginRequest) -> Result<LogoutResponse, AppError> {
-    let user = verify_credentials(pool, request, "logout").await?;
+pub(super) async fn refresh_session(
+    pool: &PgPool,
+    current_refresh_token: &str,
+) -> Result<(RefreshResponse, String), AppError> {
+    let access_token = generate_session_token()?;
+    let refresh_token = generate_session_token()?;
+    let rotated = repository::rotate_session_tokens(
+        pool,
+        &Sha256::digest(current_refresh_token.as_bytes()),
+        &Sha256::digest(access_token.as_bytes()),
+        &Sha256::digest(refresh_token.as_bytes()),
+        ACCESS_TTL_SECONDS,
+        REFRESH_TTL_SECONDS,
+    )
+    .await
+    .map_err(|_| {
+        error!(
+            event = "session_rotation_failed",
+            "Could not rotate session tokens"
+        );
+        AppError::Internal
+    })?;
 
-    let login_state_changed = repository::set_login_state(pool, user.id, false)
+    if !rotated {
+        return Err(AppError::InvalidRefreshToken);
+    }
+
+    Ok((RefreshResponse { access_token }, refresh_token))
+}
+
+pub(super) async fn logout_user(
+    pool: &PgPool,
+    access_token: &str,
+) -> Result<LogoutResponse, AppError> {
+    let token_hash = Sha256::digest(access_token.as_bytes());
+    let revoked = repository::revoke_session_by_access_token(pool, &token_hash)
         .await
         .map_err(|_| {
             error!(
                 target: "nit_v1::auth::logout",
-                event = "logout_state_update_failed",
-                user_id = user.id,
-                "Could not update the account login state"
+                event = "session_revocation_failed",
+                "Could not revoke the session"
             );
             AppError::Internal
         })?;
 
-    if !login_state_changed {
-        warn!(
-            target: "nit_v1::auth::logout",
-            event = "logout_already_logged_out",
-            user_id = user.id,
-            "Logout rejected because the account is already logged out"
-        );
-        return Err(AppError::AlreadyLoggedOut);
+    if !revoked {
+        return Err(AppError::InvalidAccessToken);
     }
 
     info!(
         target: "nit_v1::auth::logout",
         event = "logout_success",
-        user_id = user.id,
-        name = %user.name,
-        email = %user.email,
         "User logged out successfully"
     );
 
