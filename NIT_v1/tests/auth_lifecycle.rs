@@ -1,7 +1,10 @@
 use axum::{
     Router,
     body::{Body, to_bytes},
-    http::{Request, StatusCode, header::CONTENT_TYPE},
+    http::{
+        Request, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE},
+    },
 };
 use nit_v1::{build_router, state::AppState};
 use serde_json::{Value, json};
@@ -58,6 +61,66 @@ async fn account_can_log_in_and_out_only_from_the_expected_state(pool: PgPool) {
     let next_login = post_json(&app, "/api/v1/auth/login", &credentials, StatusCode::OK).await;
     assert_eq!(next_login["data"]["message"], "Logged in");
     assert_logged_in(&pool, email, true).await;
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn logout_revokes_access_to_protected_routes(pool: PgPool) {
+    let app = build_router(AppState { db: pool });
+    let email = "session-test@example.com";
+    let password = "test-password-123";
+
+    post_json(
+        &app,
+        "/api/v1/auth/register",
+        &json!({ "name": "Session Test", "email": email, "password": password }),
+        StatusCode::CREATED,
+    )
+    .await;
+
+    let login = post_json(
+        &app,
+        "/api/v1/auth/login",
+        &json!({ "email": email, "password": password }),
+        StatusCode::OK,
+    )
+    .await;
+
+    let access_token = login["data"]["accessToken"]
+        .as_str()
+        .filter(|token| !token.is_empty())
+        .expect("login should return a non-empty access token");
+    let bearer = format!("Bearer {access_token}");
+
+    let protected_request = || {
+        Request::get("/api/v1/interests")
+            .header(AUTHORIZATION, bearer.as_str())
+            .body(Body::empty())
+            .expect("valid protected request")
+    };
+
+    let before_logout = app
+        .clone()
+        .oneshot(protected_request())
+        .await
+        .expect("router response");
+    assert_eq!(before_logout.status(), StatusCode::OK);
+
+    let logout_request = Request::post("/api/v1/auth/logout")
+        .header(AUTHORIZATION, bearer.as_str())
+        .body(Body::empty())
+        .expect("valid logout request");
+    let logout = app
+        .clone()
+        .oneshot(logout_request)
+        .await
+        .expect("router response");
+    assert_eq!(logout.status(), StatusCode::OK);
+
+    let after_logout = app
+        .oneshot(protected_request())
+        .await
+        .expect("router response");
+    assert_eq!(after_logout.status(), StatusCode::UNAUTHORIZED);
 }
 
 async fn post_json(app: &Router, path: &str, body: &Value, status: StatusCode) -> Value {
