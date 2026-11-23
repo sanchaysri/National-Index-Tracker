@@ -134,7 +134,7 @@
         }
 
         indexResult.textContent = indices.length
-          ? "Select an index to see its value."
+          ? "Select an index to see its details."
           : "No indices found for this interest.";
 
         for (const index of indices) {
@@ -145,10 +145,12 @@
 
           button.addEventListener("click", () => {
             selectButton(indexButtons, button);
-            const unit = index.unit || "";
-            const period = index.period || "Not available";
-            indexResult.textContent =
-              `${interest.name} — ${index.name}: ${index.value}${unit}. Period: ${period}`;
+            const details = [
+              `${interest.name} — ${index.name}`,
+              index.description,
+              index.unit && `Unit: ${index.unit}`,
+            ];
+            indexResult.textContent = details.filter(Boolean).join(" · ");
           });
 
           indexButtons.appendChild(button);

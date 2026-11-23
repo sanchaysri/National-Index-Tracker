@@ -5,7 +5,27 @@ use super::{
     model::{CreateIndexRequest, Index},
     repository,
 };
-use crate::error::AppError;
+use crate::{error::AppError, features::sectors};
+
+pub async fn list_for_interest(pool: &PgPool, interest_id: i32) -> Result<Vec<Index>, AppError> {
+    let indices = repository::list_for_interest(pool, interest_id)
+        .await
+        .map_err(|err| {
+            error!(
+                target: "nit_v1::indices",
+                event = "interest_indices_list_db_error",
+                interest_id,
+                error = %err,
+                "Could not list indices for interest"
+            );
+            AppError::Internal
+        })?;
+    if indices.is_empty() {
+        // An empty list is valid only when the parent interest exists.
+        sectors::service::get_interest(pool, interest_id).await?;
+    }
+    Ok(indices)
+}
 
 pub async fn create_index(pool: &PgPool, request: CreateIndexRequest) -> Result<Index, AppError> {
     let interest_id = request.interest_id;
@@ -81,6 +101,58 @@ mod tests {
             description: None,
             unit: None,
         }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn lists_only_indices_for_the_requested_interest_in_id_order(pool: PgPool) {
+        sqlx::query("INSERT INTO interests (id, name) VALUES (1, 'Energy'), (2, 'Health')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO indices (id, interest_id, name, description, unit)
+             VALUES (30, 1, 'Wind', NULL, NULL), (20, 2, 'Beds', NULL, NULL),
+                    (10, 1, 'Solar', 'Solar output', 'MWh')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = list_for_interest(&pool, 1).await.expect("list indices");
+        assert_eq!(rows.iter().map(|i| i.id).collect::<Vec<_>>(), [10, 30]);
+        assert_eq!(rows[0].interest_id, 1);
+        assert_eq!(rows[0].name, "Solar");
+        assert_eq!(rows[0].description.as_deref(), Some("Solar output"));
+        assert_eq!(rows[0].unit.as_deref(), Some("MWh"));
+        assert!(rows[1].unit.is_none());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn distinguishes_an_empty_interest_from_a_missing_interest(pool: PgPool) {
+        sqlx::query("INSERT INTO interests (id, name) VALUES (1, 'Energy')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            list_for_interest(&pool, 1)
+                .await
+                .expect("list indices")
+                .is_empty()
+        );
+        assert!(matches!(
+            list_for_interest(&pool, 2).await,
+            Err(AppError::InterestNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn listing_indices_reports_a_database_failure() {
+        let pool = PgPool::connect_lazy("postgres://localhost/test").unwrap();
+        pool.close().await;
+        assert!(matches!(
+            list_for_interest(&pool, 1).await,
+            Err(AppError::Internal)
+        ));
     }
 
     #[sqlx::test(migrations = "./migrations")]

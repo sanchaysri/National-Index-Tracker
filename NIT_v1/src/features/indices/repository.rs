@@ -2,6 +2,16 @@ use sqlx::PgPool;
 
 use super::model::Index;
 
+pub async fn list_for_interest(pool: &PgPool, interest_id: i32) -> Result<Vec<Index>, sqlx::Error> {
+    sqlx::query_as::<_, Index>(
+        "SELECT id, interest_id, name, description, unit FROM indices
+         WHERE interest_id = $1 ORDER BY id",
+    )
+    .bind(interest_id)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn delete_index(pool: &PgPool, index_id: i32) -> Result<bool, sqlx::Error> {
     let result = sqlx::query("DELETE FROM indices WHERE id = $1")
         .bind(index_id)
