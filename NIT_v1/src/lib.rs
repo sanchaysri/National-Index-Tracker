@@ -43,6 +43,7 @@ pub fn build_router(state: AppState) -> Router {
             get(interests::list_interest_indices),
         )
         .merge(features::auth::routes::routes())
+        .merge(features::indices::routes::routes())
         .merge(features::sectors::routes::routes())
         .layer(axum::middleware::from_fn(log_request))
         .with_state(state)
