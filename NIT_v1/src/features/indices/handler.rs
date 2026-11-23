@@ -11,6 +11,37 @@ use super::{
 };
 use crate::{error::AppError, state::AppState};
 
+pub async fn get_index(
+    State(state): State<AppState>,
+    Path(index_id): Path<i32>,
+) -> Result<Json<Index>, AppError> {
+    debug!(target: "nit_v1::indices", event = "index_get_started", index_id, "Fetching index");
+    let index = service::get_index(&state.db, index_id).await?;
+    info!(target: "nit_v1::indices", event = "index_get_succeeded", index_id, "Fetched index");
+    Ok(Json(index))
+}
+
+pub async fn list_for_interest(
+    State(state): State<AppState>,
+    Path(interest_id): Path<i32>,
+) -> Result<Json<Vec<Index>>, AppError> {
+    debug!(
+        target: "nit_v1::indices",
+        event = "interest_indices_list_started",
+        interest_id,
+        "Listing indices for interest"
+    );
+    let indices = service::list_for_interest(&state.db, interest_id).await?;
+    info!(
+        target: "nit_v1::indices",
+        event = "interest_indices_list_succeeded",
+        interest_id,
+        index_count = indices.len(),
+        "Listed indices for interest"
+    );
+    Ok(Json(indices))
+}
+
 pub async fn delete_index(
     State(state): State<AppState>,
     Path(index_id): Path<i32>,

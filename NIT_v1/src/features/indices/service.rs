@@ -5,7 +5,47 @@ use super::{
     model::{CreateIndexRequest, Index},
     repository,
 };
-use crate::error::AppError;
+use crate::{error::AppError, features::sectors};
+
+pub async fn get_index(pool: &PgPool, index_id: i32) -> Result<Index, AppError> {
+    match repository::get_index(pool, index_id).await {
+        Ok(Some(index)) => Ok(index),
+        Ok(None) => {
+            warn!(target: "nit_v1::indices", event = "index_get_not_found", index_id, "Index does not exist");
+            Err(AppError::IndexNotFound)
+        }
+        Err(err) => {
+            error!(
+                target: "nit_v1::indices",
+                event = "index_get_db_error",
+                index_id,
+                error = %err,
+                "Could not fetch index"
+            );
+            Err(AppError::Internal)
+        }
+    }
+}
+
+pub async fn list_for_interest(pool: &PgPool, interest_id: i32) -> Result<Vec<Index>, AppError> {
+    let indices = repository::list_for_interest(pool, interest_id)
+        .await
+        .map_err(|err| {
+            error!(
+                target: "nit_v1::indices",
+                event = "interest_indices_list_db_error",
+                interest_id,
+                error = %err,
+                "Could not list indices for interest"
+            );
+            AppError::Internal
+        })?;
+    if indices.is_empty() {
+        // An empty list is valid only when the parent interest exists.
+        sectors::service::get_interest(pool, interest_id).await?;
+    }
+    Ok(indices)
+}
 
 pub async fn create_index(pool: &PgPool, request: CreateIndexRequest) -> Result<Index, AppError> {
     let interest_id = request.interest_id;
@@ -20,7 +60,7 @@ pub async fn create_index(pool: &PgPool, request: CreateIndexRequest) -> Result<
         return Err(AppError::BadRequest("Index name is required".into()));
     }
 
-    repository::insert_index(
+    let index = repository::insert_index(
         pool,
         interest_id,
         name,
@@ -49,6 +89,16 @@ pub async fn create_index(pool: &PgPool, request: CreateIndexRequest) -> Result<
             );
             AppError::Internal
         }
+    })?;
+
+    index.ok_or_else(|| {
+        warn!(
+            target: "nit_v1::indices",
+            event = "index_create_conflict",
+            interest_id,
+            "An index with that name already exists for this interest"
+        );
+        AppError::IndexAlreadyExists
     })
 }
 
@@ -74,6 +124,49 @@ pub async fn delete_index(pool: &PgPool, index_id: i32) -> Result<(), AppError> 
 mod tests {
     use super::*;
 
+    #[sqlx::test(migrations = "./migrations")]
+    async fn gets_the_requested_index_by_id(pool: PgPool) {
+        sqlx::query("INSERT INTO interests (id, name) VALUES (10, 'Energy')")
+            .execute(&pool)
+            .await
+            .expect("seed interest");
+        sqlx::query(
+            "INSERT INTO indices (id, interest_id, name, description, unit)
+             VALUES (1, 10, 'Solar', NULL, NULL), (2, 10, 'Wind', 'Wind output', 'MWh')",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed indices");
+
+        let index = get_index(&pool, 2).await.expect("get index");
+        assert_eq!(index.id, 2);
+        assert_eq!(index.interest_id, 10);
+        assert_eq!(index.name, "Wind");
+        assert_eq!(index.description.as_deref(), Some("Wind output"));
+        assert_eq!(index.unit.as_deref(), Some("MWh"));
+
+        let solar = get_index(&pool, 1)
+            .await
+            .expect("get index without optional fields");
+        assert!(solar.description.is_none());
+        assert!(solar.unit.is_none());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn returns_not_found_for_unknown_index(pool: PgPool) {
+        assert!(matches!(
+            get_index(&pool, 999).await,
+            Err(AppError::IndexNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn getting_an_index_reports_a_database_failure() {
+        let pool = PgPool::connect_lazy("postgres://localhost/test").unwrap();
+        pool.close().await;
+        assert!(matches!(get_index(&pool, 1).await, Err(AppError::Internal)));
+    }
+
     fn request(interest_id: i32, name: &str) -> CreateIndexRequest {
         CreateIndexRequest {
             interest_id,
@@ -81,6 +174,80 @@ mod tests {
             description: None,
             unit: None,
         }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn enforces_index_name_uniqueness_within_each_interest(pool: PgPool) {
+        sqlx::query("INSERT INTO interests (id, name) VALUES (1, 'Energy'), (2, 'Environment')")
+            .execute(&pool)
+            .await
+            .expect("seed interests");
+
+        let first = create_index(&pool, request(1, "Solar"))
+            .await
+            .expect("create the first index");
+        let duplicate = create_index(&pool, request(1, " Solar ")).await;
+        assert!(matches!(duplicate, Err(AppError::IndexAlreadyExists)));
+
+        let other = create_index(&pool, request(2, "Solar"))
+            .await
+            .expect("allow the same name for a different interest");
+        assert_ne!(first.id, other.id);
+        let stored = list_for_interest(&pool, 1).await.expect("list indices");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, first.id);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn lists_only_indices_for_the_requested_interest_in_id_order(pool: PgPool) {
+        sqlx::query("INSERT INTO interests (id, name) VALUES (1, 'Energy'), (2, 'Health')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO indices (id, interest_id, name, description, unit)
+             VALUES (30, 1, 'Wind', NULL, NULL), (20, 2, 'Beds', NULL, NULL),
+                    (10, 1, 'Solar', 'Solar output', 'MWh')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = list_for_interest(&pool, 1).await.expect("list indices");
+        assert_eq!(rows.iter().map(|i| i.id).collect::<Vec<_>>(), [10, 30]);
+        assert_eq!(rows[0].interest_id, 1);
+        assert_eq!(rows[0].name, "Solar");
+        assert_eq!(rows[0].description.as_deref(), Some("Solar output"));
+        assert_eq!(rows[0].unit.as_deref(), Some("MWh"));
+        assert!(rows[1].unit.is_none());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn distinguishes_an_empty_interest_from_a_missing_interest(pool: PgPool) {
+        sqlx::query("INSERT INTO interests (id, name) VALUES (1, 'Energy')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            list_for_interest(&pool, 1)
+                .await
+                .expect("list indices")
+                .is_empty()
+        );
+        assert!(matches!(
+            list_for_interest(&pool, 2).await,
+            Err(AppError::InterestNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn listing_indices_reports_a_database_failure() {
+        let pool = PgPool::connect_lazy("postgres://localhost/test").unwrap();
+        pool.close().await;
+        assert!(matches!(
+            list_for_interest(&pool, 1).await,
+            Err(AppError::Internal)
+        ));
     }
 
     #[sqlx::test(migrations = "./migrations")]

@@ -46,10 +46,6 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/api/v1/health", get(health))
-        .route(
-            "/profile",
-            get(|| async { axum::response::Html(include_str!("../frontend/profile.html")) }),
-        )
         .merge(features::auth::routes::routes())
         .merge(protected_routes)
         .layer(axum::middleware::from_fn(log_request))
