@@ -11,6 +11,23 @@ pub async fn get_index(pool: &PgPool, index_id: i32) -> Result<Option<Index>, sq
     .await
 }
 
+pub async fn get_latest_payload(
+    pool: &PgPool,
+    index_id: i32,
+) -> Result<Option<(Option<String>, sqlx::types::Json<serde_json::Value>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT indices.description, index_values.payload
+         FROM indices
+         JOIN index_values ON index_values.index_id = indices.id
+         WHERE indices.id = $1
+         ORDER BY index_values.observed_on DESC, index_values.fetched_at DESC, index_values.id DESC
+         LIMIT 1",
+    )
+    .bind(index_id)
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn list_for_interest(pool: &PgPool, interest_id: i32) -> Result<Vec<Index>, sqlx::Error> {
     sqlx::query_as::<_, Index>(
         "SELECT id, interest_id, name, description FROM indices

@@ -14,6 +14,10 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/api/v1/indices", post(handler::create_index))
         .route(
+            "/api/v1/indices/{index_id}/payload",
+            get(handler::get_payload),
+        )
+        .route(
             "/api/v1/indices/{index_id}",
             get(handler::get_index).delete(handler::delete_index),
         )

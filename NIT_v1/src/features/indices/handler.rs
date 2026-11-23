@@ -21,6 +21,26 @@ pub async fn get_index(
     Ok(Json(index))
 }
 
+pub async fn get_payload(
+    State(state): State<AppState>,
+    Path(index_id): Path<i32>,
+) -> Result<Json<super::model::IndexPayload>, AppError> {
+    debug!(
+        target: "nit_v1::indices",
+        event = "index_payload_get_started",
+        index_id,
+        "Fetching index payload"
+    );
+    let payload = service::get_latest_payload(&state.db, index_id).await?;
+    info!(
+        target: "nit_v1::indices",
+        event = "index_payload_get_succeeded",
+        index_id,
+        "Fetched index payload"
+    );
+    Ok(Json(payload))
+}
+
 pub async fn list_for_interest(
     State(state): State<AppState>,
     Path(interest_id): Path<i32>,

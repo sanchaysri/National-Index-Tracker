@@ -1,8 +1,9 @@
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use tracing::{error, warn};
 
 use super::{
-    model::{CreateIndexRequest, Index},
+    model::{CreateIndexRequest, Index, IndexPayload},
     repository,
 };
 use crate::{error::AppError, features::sectors};
@@ -25,6 +26,60 @@ pub async fn get_index(pool: &PgPool, index_id: i32) -> Result<Index, AppError> 
             Err(AppError::Internal)
         }
     }
+}
+
+pub async fn get_latest_payload(pool: &PgPool, index_id: i32) -> Result<IndexPayload, AppError> {
+    get_index(pool, index_id).await?;
+    let (description, payload) = repository::get_latest_payload(pool, index_id)
+        .await
+        .map_err(|err| {
+            error!(
+                target: "nit_v1::indices",
+                event = "index_payload_get_db_error",
+                index_id,
+                error = %err,
+                "Could not fetch index payload"
+            );
+            AppError::Internal
+        })?
+        .ok_or(AppError::IndexPayloadNotFound)?;
+
+    let (description, fields) = split_description_fields(description)?;
+    Ok(IndexPayload {
+        description,
+        fields,
+        records: payload.0,
+    })
+}
+
+fn split_description_fields(
+    description: Option<String>,
+) -> Result<(Option<String>, Value), AppError> {
+    const MARKER: &str = "[data.gov.in fields source_id=";
+    let Some(description) = description else {
+        return Ok((None, json!([])));
+    };
+    let Some(marker_start) = description.find(MARKER) else {
+        return Ok((Some(description), json!([])));
+    };
+    let fields_start = description[marker_start..]
+        .find('\n')
+        .map(|offset| marker_start + offset + 1)
+        .ok_or(AppError::Internal)?;
+    let fields = serde_json::from_str(&description[fields_start..]).map_err(|err| {
+        error!(
+            target: "nit_v1::indices",
+            event = "index_payload_fields_parse_error",
+            error = %err,
+            "Could not parse stored index fields"
+        );
+        AppError::Internal
+    })?;
+    let human_description = description[..marker_start].trim().to_string();
+    Ok((
+        (!human_description.is_empty()).then_some(human_description),
+        fields,
+    ))
 }
 
 pub async fn list_for_interest(pool: &PgPool, interest_id: i32) -> Result<Vec<Index>, AppError> {

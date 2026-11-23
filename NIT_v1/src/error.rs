@@ -18,6 +18,7 @@ pub enum AppError {
     InterestAlreadyExists,
     InterestInUse,
     IndexNotFound,
+    IndexPayloadNotFound,
     IndexAlreadyExists,
     IndexInUse,
     Internal,
@@ -58,6 +59,11 @@ impl IntoResponse for AppError {
                 StatusCode::NOT_FOUND,
                 "INDEX_NOT_FOUND",
                 "Index not found".to_string(),
+            ),
+            AppError::IndexPayloadNotFound => (
+                StatusCode::NOT_FOUND,
+                "INDEX_PAYLOAD_NOT_FOUND",
+                "Index payload not found".to_string(),
             ),
             AppError::IndexAlreadyExists => (
                 StatusCode::CONFLICT,
