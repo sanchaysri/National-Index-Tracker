@@ -40,7 +40,7 @@ pub async fn create_index(pool: &PgPool, request: CreateIndexRequest) -> Result<
         return Err(AppError::BadRequest("Index name is required".into()));
     }
 
-    repository::insert_index(
+    let index = repository::insert_index(
         pool,
         interest_id,
         name,
@@ -69,6 +69,16 @@ pub async fn create_index(pool: &PgPool, request: CreateIndexRequest) -> Result<
             );
             AppError::Internal
         }
+    })?;
+
+    index.ok_or_else(|| {
+        warn!(
+            target: "nit_v1::indices",
+            event = "index_create_conflict",
+            interest_id,
+            "An index with that name already exists for this interest"
+        );
+        AppError::IndexAlreadyExists
     })
 }
 
@@ -101,6 +111,28 @@ mod tests {
             description: None,
             unit: None,
         }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn enforces_index_name_uniqueness_within_each_interest(pool: PgPool) {
+        sqlx::query("INSERT INTO interests (id, name) VALUES (1, 'Energy'), (2, 'Environment')")
+            .execute(&pool)
+            .await
+            .expect("seed interests");
+
+        let first = create_index(&pool, request(1, "Solar"))
+            .await
+            .expect("create the first index");
+        let duplicate = create_index(&pool, request(1, " Solar ")).await;
+        assert!(matches!(duplicate, Err(AppError::IndexAlreadyExists)));
+
+        let other = create_index(&pool, request(2, "Solar"))
+            .await
+            .expect("allow the same name for a different interest");
+        assert_ne!(first.id, other.id);
+        let stored = list_for_interest(&pool, 1).await.expect("list indices");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, first.id);
     }
 
     #[sqlx::test(migrations = "./migrations")]

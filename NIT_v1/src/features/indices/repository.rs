@@ -26,16 +26,17 @@ pub async fn insert_index(
     name: &str,
     description: Option<&str>,
     unit: Option<&str>,
-) -> Result<Index, sqlx::Error> {
+) -> Result<Option<Index>, sqlx::Error> {
     sqlx::query_as::<_, Index>(
         "INSERT INTO indices (interest_id, name, description, unit)
          VALUES ($1, $2, $3, $4)
+         ON CONFLICT ON CONSTRAINT indices_interest_id_name_key DO NOTHING
          RETURNING id, interest_id, name, description, unit",
     )
     .bind(interest_id)
     .bind(name)
     .bind(description)
     .bind(unit)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
 }
