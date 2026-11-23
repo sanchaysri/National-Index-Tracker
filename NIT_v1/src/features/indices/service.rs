@@ -60,36 +60,31 @@ pub async fn create_index(pool: &PgPool, request: CreateIndexRequest) -> Result<
         return Err(AppError::BadRequest("Index name is required".into()));
     }
 
-    let index = repository::insert_index(
-        pool,
-        interest_id,
-        name,
-        request.description.as_deref(),
-        request.unit.as_deref(),
-    )
-    .await
-    .map_err(|err| match err.as_database_error() {
-        Some(db)
-            if db.is_foreign_key_violation() && db.constraint() == Some("fk_indices_interest") =>
-        {
-            warn!(
-                target: "nit_v1::indices",
-                event = "index_create_interest_not_found",
-                interest_id,
-                "Cannot create index for an unknown interest"
-            );
-            AppError::InterestNotFound
-        }
-        _ => {
-            error!(
-                target: "nit_v1::indices",
-                event = "index_create_db_error",
-                interest_id,
-                "Could not insert index"
-            );
-            AppError::Internal
-        }
-    })?;
+    let index = repository::insert_index(pool, interest_id, name, request.description.as_deref())
+        .await
+        .map_err(|err| match err.as_database_error() {
+            Some(db)
+                if db.is_foreign_key_violation()
+                    && db.constraint() == Some("fk_indices_interest") =>
+            {
+                warn!(
+                    target: "nit_v1::indices",
+                    event = "index_create_interest_not_found",
+                    interest_id,
+                    "Cannot create index for an unknown interest"
+                );
+                AppError::InterestNotFound
+            }
+            _ => {
+                error!(
+                    target: "nit_v1::indices",
+                    event = "index_create_db_error",
+                    interest_id,
+                    "Could not insert index"
+                );
+                AppError::Internal
+            }
+        })?;
 
     index.ok_or_else(|| {
         warn!(
@@ -131,8 +126,8 @@ mod tests {
             .await
             .expect("seed interest");
         sqlx::query(
-            "INSERT INTO indices (id, interest_id, name, description, unit)
-             VALUES (1, 10, 'Solar', NULL, NULL), (2, 10, 'Wind', 'Wind output', 'MWh')",
+            "INSERT INTO indices (id, interest_id, name, description)
+             VALUES (1, 10, 'Solar', NULL), (2, 10, 'Wind', 'Wind output')",
         )
         .execute(&pool)
         .await
@@ -143,13 +138,11 @@ mod tests {
         assert_eq!(index.interest_id, 10);
         assert_eq!(index.name, "Wind");
         assert_eq!(index.description.as_deref(), Some("Wind output"));
-        assert_eq!(index.unit.as_deref(), Some("MWh"));
 
         let solar = get_index(&pool, 1)
             .await
             .expect("get index without optional fields");
         assert!(solar.description.is_none());
-        assert!(solar.unit.is_none());
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -172,7 +165,6 @@ mod tests {
             interest_id,
             name: name.into(),
             description: None,
-            unit: None,
         }
     }
 
@@ -205,9 +197,9 @@ mod tests {
             .await
             .unwrap();
         sqlx::query(
-            "INSERT INTO indices (id, interest_id, name, description, unit)
-             VALUES (30, 1, 'Wind', NULL, NULL), (20, 2, 'Beds', NULL, NULL),
-                    (10, 1, 'Solar', 'Solar output', 'MWh')",
+            "INSERT INTO indices (id, interest_id, name, description)
+             VALUES (30, 1, 'Wind', NULL), (20, 2, 'Beds', NULL),
+                    (10, 1, 'Solar', 'Solar output')",
         )
         .execute(&pool)
         .await
@@ -218,8 +210,6 @@ mod tests {
         assert_eq!(rows[0].interest_id, 1);
         assert_eq!(rows[0].name, "Solar");
         assert_eq!(rows[0].description.as_deref(), Some("Solar output"));
-        assert_eq!(rows[0].unit.as_deref(), Some("MWh"));
-        assert!(rows[1].unit.is_none());
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -259,7 +249,6 @@ mod tests {
                 .unwrap();
         let mut input = request(interest_id, "  Solar output  ");
         input.description = Some("Daily generation".into());
-        input.unit = Some("MWh".into());
         let created = create_index(&pool, input).await.expect("create index");
         let stored = sqlx::query_as::<_, Index>("SELECT * FROM indices WHERE id = $1")
             .bind(created.id)
@@ -269,7 +258,6 @@ mod tests {
         assert_eq!(stored.interest_id, interest_id);
         assert_eq!(stored.name, "Solar output");
         assert_eq!(stored.description.as_deref(), Some("Daily generation"));
-        assert_eq!(stored.unit.as_deref(), Some("MWh"));
     }
 
     #[sqlx::test(migrations = "./migrations")]

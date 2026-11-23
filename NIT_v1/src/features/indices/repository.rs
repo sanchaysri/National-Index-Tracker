@@ -4,7 +4,7 @@ use super::model::Index;
 
 pub async fn get_index(pool: &PgPool, index_id: i32) -> Result<Option<Index>, sqlx::Error> {
     sqlx::query_as::<_, Index>(
-        "SELECT id, interest_id, name, description, unit FROM indices WHERE id = $1",
+        "SELECT id, interest_id, name, description FROM indices WHERE id = $1",
     )
     .bind(index_id)
     .fetch_optional(pool)
@@ -13,7 +13,7 @@ pub async fn get_index(pool: &PgPool, index_id: i32) -> Result<Option<Index>, sq
 
 pub async fn list_for_interest(pool: &PgPool, interest_id: i32) -> Result<Vec<Index>, sqlx::Error> {
     sqlx::query_as::<_, Index>(
-        "SELECT id, interest_id, name, description, unit FROM indices
+        "SELECT id, interest_id, name, description FROM indices
          WHERE interest_id = $1 ORDER BY id",
     )
     .bind(interest_id)
@@ -34,18 +34,16 @@ pub async fn insert_index(
     interest_id: i32,
     name: &str,
     description: Option<&str>,
-    unit: Option<&str>,
 ) -> Result<Option<Index>, sqlx::Error> {
     sqlx::query_as::<_, Index>(
-        "INSERT INTO indices (interest_id, name, description, unit)
-         VALUES ($1, $2, $3, $4)
+        "INSERT INTO indices (interest_id, name, description)
+         VALUES ($1, $2, $3)
          ON CONFLICT ON CONSTRAINT indices_interest_id_name_key DO NOTHING
-         RETURNING id, interest_id, name, description, unit",
+         RETURNING id, interest_id, name, description",
     )
     .bind(interest_id)
     .bind(name)
     .bind(description)
-    .bind(unit)
     .fetch_optional(pool)
     .await
 }

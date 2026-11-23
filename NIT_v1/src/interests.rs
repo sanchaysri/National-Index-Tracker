@@ -19,7 +19,6 @@ pub struct IndexValue {
     id: i64,
     name: String,
     value: String,
-    unit: Option<String>,
     period: Option<String>,
 }
 
@@ -48,7 +47,7 @@ pub async fn list_interest_indices(
 ) -> Result<Json<Vec<IndexValue>>, StatusCode> {
     let rows = sqlx::query(
         "SELECT indices.id, indices.name, index_values.value::text AS value,
-                index_values.unit, index_values.period
+                index_values.period
          FROM indices
          JOIN index_values ON index_values.index_id = indices.id
          WHERE index_values.interest_id = $1
@@ -65,7 +64,6 @@ pub async fn list_interest_indices(
             id: row.get("id"),
             name: row.get("name"),
             value: row.get("value"),
-            unit: row.get("unit"),
             period: row.get("period"),
         })
         .collect();

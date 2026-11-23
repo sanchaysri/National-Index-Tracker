@@ -6,7 +6,6 @@ pub struct CreateIndexRequest {
     pub interest_id: i32,
     pub name: String,
     pub description: Option<String>,
-    pub unit: Option<String>,
 }
 
 #[derive(FromRow, Serialize)]
@@ -15,5 +14,4 @@ pub struct Index {
     pub interest_id: i32,
     pub name: String,
     pub description: Option<String>,
-    pub unit: Option<String>,
 }

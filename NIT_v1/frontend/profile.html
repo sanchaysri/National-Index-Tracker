@@ -148,7 +148,6 @@
             const details = [
               `${interest.name} — ${index.name}`,
               index.description,
-              index.unit && `Unit: ${index.unit}`,
             ];
             indexResult.textContent = details.filter(Boolean).join(" · ");
           });
