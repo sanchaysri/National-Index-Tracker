@@ -1,13 +1,15 @@
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
+};
 use tracing::info;
 
-use crate::{error::AppError, state::AppState};
+use crate::{error::AppError, middleware::auth::bearer_token, state::AppState};
 
 use super::{
-    model::{
-        DataResponse, LoginRequest, LoginResponse, LogoutResponse, RegisterRequest,
-        RegisterResponse,
-    },
+    model::{DataResponse, LoginRequest, RegisterRequest, RegisterResponse},
     service,
 };
 
@@ -49,7 +51,7 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     Json(request): Json<LoginRequest>,
-) -> Result<Json<DataResponse<LoginResponse>>, AppError> {
+) -> Result<Response, AppError> {
     // INFO: Login request received
     info!(
         target: "nit_v1::auth::login",
@@ -58,24 +60,70 @@ pub async fn login(
     );
 
     // Call login service
-    let response = service::login_user(&state.db, request).await?;
+    let (response, refresh_token) = service::login_user(&state.db, request).await?;
+    session_response(response, &refresh_token, service::REFRESH_TTL_SECONDS)
+}
 
-    // INFO: Login successful
-    Ok(Json(DataResponse { data: response }))
+fn session_response<T: serde::Serialize>(
+    response: T,
+    refresh_token: &str,
+    max_age: i32,
+) -> Result<Response, AppError> {
+    let cookie = HeaderValue::from_str(&format!(
+        "refresh_token={refresh_token}; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/auth; Max-Age={max_age}"
+    ))
+    .map_err(|_| AppError::Internal)?;
+
+    Ok((
+        [
+            (header::SET_COOKIE, cookie),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        Json(DataResponse { data: response }),
+    )
+        .into_response())
+}
+
+pub async fn refresh(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let token = refresh_cookie(&headers).ok_or(AppError::InvalidRefreshToken)?;
+    let (response, refresh_token) = service::refresh_session(&state.db, token).await?;
+    session_response(response, &refresh_token, service::REFRESH_TTL_SECONDS)
+}
+
+fn refresh_cookie(headers: &HeaderMap) -> Option<&str> {
+    let mut token = None;
+    for header in headers.get_all(header::COOKIE) {
+        for pair in header.to_str().ok()?.split(';') {
+            if let Some(value) = pair.trim().strip_prefix("refresh_token=") {
+                if token.is_some()
+                    || value.len() != 64
+                    || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                {
+                    return None;
+                }
+                token = Some(value);
+            }
+        }
+    }
+    token
 }
 
 pub async fn logout(
     State(state): State<AppState>,
-    Json(request): Json<LoginRequest>,
-) -> Result<Json<DataResponse<LogoutResponse>>, AppError> {
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
     info!(
         target: "nit_v1::auth::logout",
         event = "logout_started",
         "Logout request received"
     );
 
-    let response = service::logout_user(&state.db, request).await?;
-    Ok(Json(DataResponse { data: response }))
+    let token = bearer_token(&headers).ok_or(AppError::InvalidAccessToken)?;
+    let response = service::logout_user(&state.db, token).await?;
+    session_response(response, "", 0)
 }
 
 // ========================================
