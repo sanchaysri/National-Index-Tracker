@@ -34,10 +34,6 @@ async fn health(State(state): State<AppState>) -> Result<Json<Value>, StatusCode
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
-        .route(
-            "/profile",
-            get(|| async { axum::response::Html(include_str!("../frontend/profile.html")) }),
-        )
         .merge(features::auth::routes::routes())
         .merge(features::indices::routes::routes())
         .merge(features::sectors::routes::routes())
