@@ -262,8 +262,8 @@ mod tests {
         .await
         .expect("seed data source");
         sqlx::query(
-            "INSERT INTO index_values (index_id, source_id, value, observed_on)
-             VALUES (1, 1, 100, DATE '2026-01-01')",
+            "INSERT INTO index_values (index_id, source_id, payload, observed_on)
+             VALUES (1, 1, jsonb_build_object('admissions', 100), DATE '2026-01-01')",
         )
         .execute(&pool)
         .await
