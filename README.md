@@ -1,17 +1,17 @@
 # National Index Tracker
 
-National Index Tracker is a Rust backend for registering users, managing sectors and indices, collecting public data from data.gov.in, and serving the latest saved dataset for each index.
+National Index Tracker provides a plain HTML, CSS, and JavaScript frontend backed by a Rust API for user accounts, sectors, indices, and public data from data.gov.in.
 
 ## Backend stack
 
 - Rust 2024 with Axum
 - PostgreSQL 17 with SQLx migrations
-- Docker Compose for the API, migration runner, and database
+- Docker Compose for the frontend, API, migration runner, and database
 - Argon2 password hashing and database-backed session tokens
 - JSONB payloads for source records
 - `tracing` JSON logs written to `NIT_v1/logs/nit.log`
 
-The HTTP API is available at `http://localhost:3000/api/v1` when started through Docker Compose.
+The frontend is available at `http://localhost:8080`. The API is available directly at `http://localhost:3000/api/v1` and through the frontend's same-origin proxy at `http://localhost:8080/api/v1`.
 
 ## Quick start
 
@@ -37,7 +37,7 @@ Build and start the stack:
 docker compose up --build
 ```
 
-Docker starts PostgreSQL, waits for its health check, runs the SQLx migration container, and starts the backend only after migrations complete. The database is published only on `127.0.0.1:5433` and the API only on `127.0.0.1:3000`.
+Docker starts PostgreSQL, waits for its health check, runs the SQLx migration container, then starts the backend and Nginx frontend. The database is published on `127.0.0.1:5433`, the API on `127.0.0.1:3000`, and the frontend on `127.0.0.1:8080`. Open `http://localhost:8080` in a browser to use the application. Nginx serves the static files and proxies `/api/v1` requests to the backend so browser requests use the frontend's origin.
 
 Check the service:
 
@@ -54,7 +54,55 @@ Expected response:
 }
 ```
 
-Use `docker compose logs -f backend`, `docker compose logs -f migrate`, or `docker compose logs -f db` for container output. Backend application logs are also written to `NIT_v1/logs/nit.log`.
+Use `docker compose logs -f frontend`, `docker compose logs -f backend`, `docker compose logs -f migrate`, or `docker compose logs -f db` for container output. Backend application logs are also written to `NIT_v1/logs/nit.log`.
+
+## Frontend
+
+The frontend uses static files in `NIT_v1/frontend` and has no Node.js or frontend build step. Docker Compose runs the official Nginx image to serve the files. The frontend container mounts the directory read-only, so edits to HTML, CSS, or JavaScript are visible after refreshing the page.
+
+The UI has registration and login pages, a regular user dashboard, an admin dashboard, sector pages, index data pages, and a signed-out page. It uses the authenticated API for sector and index browsing. The index data page renders the latest payload's field metadata and records as a scrollable table. Admin users also see controls for creating and deleting sectors and indices.
+
+Login redirects according to the API response role. The frontend keeps the access token in `sessionStorage` for the current tab and sends it as a bearer token. The refresh token stays in the API's HTTP-only cookie. Expired access tokens are refreshed and the failed request is retried. Logging out revokes the session and opens the signed-out page.
+
+Start the whole project with `docker compose up --build` from `NIT_v1`, then visit `http://localhost:8080`. To rebuild or restart only the frontend service, use:
+
+```bash
+docker compose up -d --build frontend
+```
+
+Frontend files are plain static assets. The JavaScript can be syntax-checked with `node --check frontend/app.js`, but Node is not needed to run the frontend.
+
+### Basic user flow
+
+1. Create an account and sign in.
+2. Browse the available sectors and open one to see its indices.
+3. Open an index to view the description, field names, and latest saved records.
+4. Continue using the app while the access token is valid. The frontend refreshes it through the cookie when needed.
+5. Sign out to revoke the session.
+
+### Administrator flow
+
+1. Register an account and promote it with the SQL command in Authentication and authorization.
+2. Sign in again to receive an administrator access token.
+3. Browse the same sectors and index data as regular users.
+4. Use the catalog forms to create sectors and indices. Delete controls appear on sector and index pages.
+
+The backend permits one active session per user. If a login attempt reports `Already logged in`, the existing session must be revoked before this browser can sign in. If the original browser is unavailable, an administrator can clear the active session in PostgreSQL:
+
+```sql
+BEGIN;
+
+UPDATE user_sessions
+SET revoked_at = CURRENT_TIMESTAMP
+WHERE user_id = (SELECT id FROM users WHERE email = 'user@example.com')
+  AND revoked_at IS NULL;
+
+UPDATE users
+SET is_logged_in = FALSE
+WHERE email = 'user@example.com';
+
+COMMIT;
+```
 
 ## Database design
 
