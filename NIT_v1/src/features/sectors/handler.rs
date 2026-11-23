@@ -5,7 +5,7 @@ use axum::{
 };
 use tracing::{debug, info};
 
-use crate::{error::AppError, state::AppState};
+use crate::{error::AppError, middleware::auth::RequireAdmin, state::AppState};
 
 use super::{
     model::{CreateInterestRequest, Interest},
@@ -13,6 +13,7 @@ use super::{
 };
 
 pub async fn create_interest(
+    _: RequireAdmin,
     State(state): State<AppState>,
     Json(request): Json<CreateInterestRequest>,
 ) -> Result<(StatusCode, Json<Interest>), AppError> {
@@ -34,7 +35,9 @@ pub async fn create_interest(
     Ok((StatusCode::CREATED, Json(interest)))
 }
 
-pub async fn list_interests(State(state): State<AppState>) -> Result<Json<Vec<Interest>>, AppError> {
+pub async fn list_interests(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Interest>>, AppError> {
     debug!(
         target: "nit_v1::sectors::interests",
         event = "interest_list_started",
@@ -77,6 +80,7 @@ pub async fn get_interest(
 }
 
 pub async fn delete_interest(
+    _: RequireAdmin,
     State(state): State<AppState>,
     Path(interest_id): Path<i32>,
 ) -> Result<StatusCode, AppError> {

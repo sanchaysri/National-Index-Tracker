@@ -1,12 +1,38 @@
 use axum::{
-    extract::{Request, State},
-    http::{HeaderMap, header::AUTHORIZATION},
+    extract::{FromRequestParts, Request, State},
+    http::{HeaderMap, header::AUTHORIZATION, request::Parts},
     middleware::Next,
     response::Response,
 };
 use sha2::{Digest, Sha256};
 
 use crate::{error::AppError, features::auth::repository, state::AppState};
+
+#[derive(Clone)]
+struct AuthenticatedUser {
+    id: i64,
+    is_admin: bool,
+}
+
+pub struct RequireAdmin;
+
+impl<S: Sync> FromRequestParts<S> for RequireAdmin {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, AppError> {
+        let user = parts
+            .extensions
+            .get::<AuthenticatedUser>()
+            .ok_or(AppError::InvalidAccessToken)?;
+
+        if !user.is_admin {
+            tracing::debug!(user_id = user.id, "Admin access denied");
+            return Err(AppError::AdminRequired);
+        }
+
+        Ok(Self)
+    }
+}
 
 pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let mut values = headers.get_all(AUTHORIZATION).iter();
@@ -27,12 +53,12 @@ pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 
 pub(crate) async fn require_access_token(
     State(state): State<AppState>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Result<Response, AppError> {
     let token = bearer_token(request.headers()).ok_or(AppError::InvalidAccessToken)?;
     let token_hash = Sha256::digest(token.as_bytes());
-    let valid = repository::has_active_access_token(&state.db, &token_hash)
+    let (id, is_admin) = repository::find_access_token_user(&state.db, &token_hash)
         .await
         .map_err(|_| {
             tracing::error!(
@@ -40,11 +66,11 @@ pub(crate) async fn require_access_token(
                 "Could not validate access token"
             );
             AppError::Internal
-        })?;
+        })?
+        .ok_or(AppError::InvalidAccessToken)?;
 
-    if !valid {
-        return Err(AppError::InvalidAccessToken);
-    }
-
+    request
+        .extensions_mut()
+        .insert(AuthenticatedUser { id, is_admin });
     Ok(next.run(request).await)
 }

@@ -9,7 +9,7 @@ use super::{
     model::{CreateIndexRequest, Index},
     service,
 };
-use crate::{error::AppError, state::AppState};
+use crate::{error::AppError, middleware::auth::RequireAdmin, state::AppState};
 
 pub async fn get_index(
     State(state): State<AppState>,
@@ -43,6 +43,7 @@ pub async fn list_for_interest(
 }
 
 pub async fn delete_index(
+    _: RequireAdmin,
     State(state): State<AppState>,
     Path(index_id): Path<i32>,
 ) -> Result<StatusCode, AppError> {
@@ -53,6 +54,7 @@ pub async fn delete_index(
 }
 
 pub async fn create_index(
+    _: RequireAdmin,
     State(state): State<AppState>,
     Json(request): Json<CreateIndexRequest>,
 ) -> Result<(StatusCode, Json<Index>), AppError> {

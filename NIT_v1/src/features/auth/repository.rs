@@ -53,22 +53,21 @@ pub async fn find_user_by_email(
     .await
 }
 
-pub(crate) async fn has_active_access_token(
+pub(crate) async fn find_access_token_user(
     pool: &PgPool,
     token_hash: &[u8],
-) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
+) -> Result<Option<(i64, bool)>, sqlx::Error> {
+    sqlx::query_as(
         r#"
-        SELECT EXISTS (
-            SELECT 1 FROM user_sessions
-            WHERE access_token_hash = $1
-              AND access_expires_at > statement_timestamp()
-              AND revoked_at IS NULL
-        )
+        SELECT users.id, users.is_admin
+        FROM user_sessions JOIN users ON users.id = user_sessions.user_id
+        WHERE access_token_hash = $1
+          AND access_expires_at > statement_timestamp()
+          AND revoked_at IS NULL
         "#,
     )
     .bind(token_hash)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
 }
 

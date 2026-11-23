@@ -210,6 +210,123 @@ async fn protected_routes_require_an_unexpired_unrevoked_access_token(pool: PgPo
     );
 }
 
+#[sqlx::test(migrations = "./migrations")]
+async fn interest_and_index_writes_require_an_admin(pool: PgPool) {
+    let app = build_router(AppState { db: pool.clone() });
+    let email = "admin-access@example.com";
+    let password = "test-password-123";
+    let credentials = json!({ "email": email, "password": password });
+    post_json(
+        &app,
+        "/api/v1/auth/register",
+        &json!({ "name": "Admin Access Test", "email": email, "password": password }),
+        StatusCode::CREATED,
+    )
+    .await;
+    let login = post_json(&app, "/api/v1/auth/login", &credentials, StatusCode::OK).await;
+    let bearer = format!("Bearer {}", login["data"]["accessToken"].as_str().unwrap());
+    let unknown_bearer = format!("Bearer {}", "0".repeat(64));
+    let interest_body = json!({ "name": "Energy" });
+
+    for (method, path, body) in [
+        ("POST", "/api/v1/interests", Some(interest_body.clone())),
+        ("DELETE", "/api/v1/interests/1", None),
+        (
+            "POST",
+            "/api/v1/indices",
+            Some(json!({ "interest_id": 1, "name": "Production" })),
+        ),
+        ("DELETE", "/api/v1/indices/1", None),
+    ] {
+        let invalid = catalog_request(&app, method, path, &unknown_bearer, body.as_ref()).await;
+        assert_eq!(
+            invalid.status(),
+            StatusCode::UNAUTHORIZED,
+            "{method} {path}"
+        );
+        let forbidden = catalog_request(&app, method, path, &bearer, body.as_ref()).await;
+        assert_eq!(forbidden.status(), StatusCode::FORBIDDEN, "{method} {path}");
+        assert_eq!(
+            json_body(forbidden).await["error"]["code"],
+            "ADMIN_REQUIRED"
+        );
+    }
+
+    // The access token should use the latest role in PostgreSQL on each request.
+    let set_admin = |is_admin: bool| {
+        sqlx::query("UPDATE users SET is_admin = $1 WHERE email = $2")
+            .bind(is_admin)
+            .bind(email)
+            .execute(&pool)
+    };
+    set_admin(true).await.unwrap();
+    let interest = catalog_request(
+        &app,
+        "POST",
+        "/api/v1/interests",
+        &bearer,
+        Some(&interest_body),
+    )
+    .await;
+    assert_eq!(interest.status(), StatusCode::CREATED);
+    let interest = json_body(interest).await;
+    let interest_id = interest["id"].as_i64().unwrap();
+    let index_body = json!({ "interest_id": interest_id, "name": "Production" });
+    let index = catalog_request(&app, "POST", "/api/v1/indices", &bearer, Some(&index_body)).await;
+    assert_eq!(index.status(), StatusCode::CREATED);
+    let index = json_body(index).await;
+    let index_id = index["id"].as_i64().unwrap();
+
+    let interest_path = format!("/api/v1/interests/{interest_id}");
+    let interest_indices_path = format!("{interest_path}/indices");
+    let index_path = format!("/api/v1/indices/{index_id}");
+    set_admin(false).await.unwrap();
+    for path in [
+        "/api/v1/interests",
+        &interest_path,
+        &interest_indices_path,
+        &index_path,
+    ] {
+        let response = catalog_request(&app, "GET", path, &bearer, None).await;
+        assert_eq!(response.status(), StatusCode::OK, "GET {path}");
+    }
+    assert_eq!(
+        catalog_request(&app, "DELETE", &index_path, &bearer, None)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+
+    set_admin(true).await.unwrap();
+    for path in [&index_path, &interest_path] {
+        let response = catalog_request(&app, "DELETE", path, &bearer, None).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT, "DELETE {path}");
+    }
+}
+
+async fn catalog_request(
+    app: &Router,
+    method: &str,
+    path: &str,
+    bearer: &str,
+    body: Option<&Value>,
+) -> Response {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header(AUTHORIZATION, bearer);
+    let body = if let Some(body) = body {
+        request = request.header(CONTENT_TYPE, "application/json");
+        Body::from(body.to_string())
+    } else {
+        Body::empty()
+    };
+    app.clone()
+        .oneshot(request.body(body).unwrap())
+        .await
+        .unwrap()
+}
+
 async fn interests_status(app: &Router, authorization: &str) -> StatusCode {
     let request = Request::get("/api/v1/interests")
         .header(AUTHORIZATION, authorization)

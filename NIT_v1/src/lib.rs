@@ -33,10 +33,6 @@ async fn health(State(state): State<AppState>) -> Result<Json<Value>, StatusCode
 
 pub fn build_router(state: AppState) -> Router {
     let protected_routes = Router::new()
-        .route(
-            "/api/v1/interests/{interest_id}/indices",
-            get(interests::list_interest_indices),
-        )
         .merge(features::indices::routes::routes())
         .merge(features::sectors::routes::routes())
         .route_layer(from_fn_with_state(

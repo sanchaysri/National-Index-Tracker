@@ -12,6 +12,7 @@ pub enum AppError {
     AlreadyLoggedIn,
     Unauthorized,
     InvalidAccessToken,
+    AdminRequired,
     InvalidRefreshToken,
     InterestNotFound,
     InterestAlreadyExists,
@@ -77,6 +78,11 @@ impl IntoResponse for AppError {
                 StatusCode::UNAUTHORIZED,
                 "INVALID_ACCESS_TOKEN",
                 "A valid access token is required".to_string(),
+            ),
+            AppError::AdminRequired => (
+                StatusCode::FORBIDDEN,
+                "ADMIN_REQUIRED",
+                "Administrator access is required".to_string(),
             ),
             AppError::InvalidRefreshToken => (
                 StatusCode::UNAUTHORIZED,
