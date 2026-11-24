@@ -229,7 +229,7 @@ Register an account. Names must contain 1 to 100 characters, email addresses are
 ```bash
 curl -X POST http://localhost:3000/api/v1/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"name":"Asha Shah","email":"asha@example.com","password":"a-secure-password"}'
+  -d '{"name":"Amrit Shah","email":"amrit@example.com","password":"a-secure-password"}'
 ```
 
 ```json
