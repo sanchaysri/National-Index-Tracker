@@ -1,0 +1,1 @@
+ALTER TABLE indices DROP COLUMN unit;

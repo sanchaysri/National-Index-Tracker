@@ -1,0 +1,8 @@
+.env
+.env.*
+target/
+logs/
+.git
+.aws
+.codex
+.agents

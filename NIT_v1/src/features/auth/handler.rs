@@ -1,0 +1,219 @@
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
+};
+use tracing::info;
+
+use crate::{error::AppError, middleware::auth::bearer_token, state::AppState};
+
+use super::{
+    model::{DataResponse, LoginRequest, RegisterRequest, RegisterResponse},
+    service,
+};
+
+// ========================================
+// REGISTRATION HANDLER
+// ========================================
+
+pub async fn register(
+    State(state): State<AppState>,
+    Json(request): Json<RegisterRequest>,
+) -> Result<(StatusCode, Json<DataResponse<RegisterResponse>>), AppError> {
+    // INFO: Registration request received
+    info!(
+        target: "nit_v1::auth::registration",
+        event = "registration_started",
+        "Registration request received"
+    );
+
+    // Call registration service
+    let user = service::register_user(&state.db, request).await?;
+
+    // INFO: Registration successful
+    info!(
+        target: "nit_v1::auth::registration",
+        event = "registration_success",
+        user_id = user.id,
+        name = %user.name,
+        email = %user.email,
+        "User registered successfully"
+    );
+
+    Ok((StatusCode::CREATED, Json(DataResponse { data: user })))
+}
+
+// ========================================
+// LOGIN HANDLER
+// ========================================
+
+pub async fn login(
+    State(state): State<AppState>,
+    Json(request): Json<LoginRequest>,
+) -> Result<Response, AppError> {
+    // INFO: Login request received
+    info!(
+        target: "nit_v1::auth::login",
+        event = "login_started",
+        "Login request received"
+    );
+
+    // Call login service
+    let (response, refresh_token) = service::login_user(&state.db, request).await?;
+    session_response(response, &refresh_token, service::REFRESH_TTL_SECONDS)
+}
+
+fn session_response<T: serde::Serialize>(
+    response: T,
+    refresh_token: &str,
+    max_age: i32,
+) -> Result<Response, AppError> {
+    let cookie = HeaderValue::from_str(&format!(
+        "refresh_token={refresh_token}; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/auth; Max-Age={max_age}"
+    ))
+    .map_err(|_| AppError::Internal)?;
+
+    Ok((
+        [
+            (header::SET_COOKIE, cookie),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        Json(DataResponse { data: response }),
+    )
+        .into_response())
+}
+
+pub async fn refresh(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let token = refresh_cookie(&headers).ok_or(AppError::InvalidRefreshToken)?;
+    let (response, refresh_token) = service::refresh_session(&state.db, token).await?;
+    session_response(response, &refresh_token, service::REFRESH_TTL_SECONDS)
+}
+
+fn refresh_cookie(headers: &HeaderMap) -> Option<&str> {
+    let mut token = None;
+    for header in headers.get_all(header::COOKIE) {
+        for pair in header.to_str().ok()?.split(';') {
+            if let Some(value) = pair.trim().strip_prefix("refresh_token=") {
+                if token.is_some()
+                    || value.len() != 64
+                    || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                {
+                    return None;
+                }
+                token = Some(value);
+            }
+        }
+    }
+    token
+}
+
+pub async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    info!(
+        target: "nit_v1::auth::logout",
+        event = "logout_started",
+        "Logout request received"
+    );
+
+    let token = bearer_token(&headers).ok_or(AppError::InvalidAccessToken)?;
+    let response = service::logout_user(&state.db, token).await?;
+    session_response(response, "", 0)
+}
+
+// ========================================
+// UNIT TESTS
+// ========================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_register_success(pool: sqlx::PgPool) {
+        let (status, Json(response)) = register(
+            State(AppState { db: pool.clone() }),
+            Json(RegisterRequest {
+                name: "Test User".to_string(),
+                email: "test@example.com".to_string(),
+                password: "securepassword".to_string(),
+            }),
+        )
+        .await
+        .expect("registration should succeed");
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(response.data.name, "Test User");
+        assert_eq!(response.data.email, "test@example.com");
+
+        let stored_id: i64 = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
+            .bind("test@example.com")
+            .fetch_one(&pool)
+            .await
+            .expect("registered user should exist in the test table");
+
+        assert_eq!(response.data.id, stored_id);
+    }
+
+    #[tokio::test]
+    async fn test_register_email_failure() {
+        let mock_state = AppState {
+            db: sqlx::PgPool::connect_lazy("postgres://user:password@localhost/test_db").unwrap(),
+        };
+
+        let response = register(
+            State(mock_state),
+            Json(RegisterRequest {
+                name: "Test User".to_string(),
+                email: "invalid-email".to_string(),
+                password: "securepassword".to_string(),
+            }),
+        )
+        .await;
+
+        assert!(response.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_register_name_failure() {
+        let mock_state = AppState {
+            db: sqlx::PgPool::connect_lazy("postgres://user:password@localhost/test_db").unwrap(),
+        };
+
+        let response = register(
+            State(mock_state),
+            Json(RegisterRequest {
+                name: "".to_string(),
+                email: "test@example.com".to_string(),
+                password: "securepassword".to_string(),
+            }),
+        )
+        .await;
+
+        assert!(response.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_register_password_failure() {
+        let mock_state = AppState {
+            db: sqlx::PgPool::connect_lazy("postgres://user:password@localhost/test_db").unwrap(),
+        };
+
+        let response = register(
+            State(mock_state),
+            Json(RegisterRequest {
+                name: "Test User".to_string(),
+                email: "test@example.com".to_string(),
+                password: "".to_string(),
+            }),
+        )
+        .await;
+
+        assert!(response.is_err());
+    }
+}
